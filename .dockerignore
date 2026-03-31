@@ -1,0 +1,16 @@
+.git
+.gitignore
+.idea
+.vscode
+node_modules
+vendor
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*
+.phpunit.cache
+temp_laravel
+*.md
+.env.backup
+.env.*.local
