@@ -9,7 +9,7 @@ class Office extends Model
 {
     protected $fillable = [
         'agency_id', 'type', 'name', 'address', 'city', 'country',
-        'contact_name', 'contact_phone', 'contact_email', 'is_active',
+        'contact_name', 'contact_phone', 'contact_phone_secondary', 'contact_email', 'is_active',
     ];
 
     protected function casts(): array

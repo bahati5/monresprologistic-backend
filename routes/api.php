@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AddressBookController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\LocationCascadeController;
 use App\Http\Controllers\Api\ShipmentWizardController;
@@ -20,7 +21,6 @@ use App\Http\Controllers\PdfController;
 use App\Http\Controllers\PickupController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PurchaseOrderController;
-use App\Http\Controllers\RecipientController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SectionDashboardController;
 use App\Http\Controllers\Settings\AgencyController;
@@ -137,12 +137,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Shipment Wizard helpers ---
     Route::prefix('shipment-wizard')->group(function () {
+        Route::get('search-profiles', [ShipmentWizardController::class, 'searchProfiles']);
         Route::get('search-clients', [ShipmentWizardController::class, 'searchClients']);
         Route::get('search-recipients', [ShipmentWizardController::class, 'searchRecipients']);
         Route::post('quick-create-client', [ShipmentWizardController::class, 'quickCreateClient']);
         Route::post('quick-create-recipient', [ShipmentWizardController::class, 'quickCreateRecipient']);
         Route::post('quick-create-delivery-time', [ShipmentWizardController::class, 'quickCreateDeliveryTime']);
         Route::get('agencies', [ShipmentWizardController::class, 'agencies']);
+        Route::get('ship-lines-for-route', [ShipmentWizardController::class, 'shipLinesForRoute']);
     });
 
     // --- Locations ---
@@ -190,7 +192,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('export/finance', [ReportController::class, 'exportFinance']);
     });
 
-    // --- Clients ---
+    // --- Clients (Profile-based) ---
     Route::middleware('permission:manage_clients')->group(function () {
         Route::get('clients', [ClientController::class, 'index']);
         Route::get('clients/{client}', [ClientController::class, 'show']);
@@ -200,13 +202,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('clients/{client}/create-portal', [ClientController::class, 'createPortal']);
     });
 
-    // --- Recipients ---
-    Route::get('recipients', [RecipientController::class, 'index']);
-    Route::post('recipients', [RecipientController::class, 'store']);
-    Route::patch('recipients/{recipient}', [RecipientController::class, 'update']);
-    Route::delete('recipients/{recipient}', [RecipientController::class, 'destroy']);
-    Route::post('recipients/{recipient}/addresses', [RecipientController::class, 'storeAddress']);
-    Route::delete('recipient-addresses/{address}', [RecipientController::class, 'destroyAddress']);
+    // --- Address Book (replaces Recipients) ---
+    Route::apiResource('address-book', AddressBookController::class)
+        ->parameters(['address-book' => 'addressBook']);
+    Route::post('address-book/{addressBook}/set-default', [AddressBookController::class, 'setDefault']);
 
     // --- Users ---
     Route::middleware('permission:manage_users')->group(function () {
@@ -341,6 +340,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('locations/cities/{city}', [LocationController::class, 'destroyCity']);
 
         Route::get('ship-lines', [ShipLineController::class, 'index']);
+        Route::get('ship-lines/for-route', [ShipLineController::class, 'forRoute']);
+        Route::post('ship-lines/merge-route', [ShipLineController::class, 'mergeRoute']);
         Route::post('ship-lines', [ShipLineController::class, 'store']);
         Route::patch('ship-lines/{shipLine}', [ShipLineController::class, 'update']);
         Route::delete('ship-lines/{shipLine}', [ShipLineController::class, 'destroy']);

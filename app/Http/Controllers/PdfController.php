@@ -10,23 +10,43 @@ use App\Models\ShippingMode;
 use App\Support\QrCodeHelper;
 use App\Support\ShipmentDocumentSettings;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
-use Illuminate\View\View;
 
 class PdfController extends Controller
 {
-    public function previewShipmentLabel(Shipment $shipment): View
+    /**
+     * Digital HTML preview of the shipment label.
+     */
+    public function previewShipmentLabel(Shipment $shipment): JsonResponse
     {
         $this->authorize('view', $shipment);
 
-        return view('pdf.shipment-label', $this->shipmentLabelViewData($shipment, true));
+        $data = $this->shipmentLabelViewData($shipment, true);
+        $html = view('pdf.shipment-label', $data)->render();
+
+        return response()->json([
+            'html' => $html,
+            'shipment_id' => $shipment->id,
+            'tracking' => $shipment->public_tracking,
+        ]);
     }
 
-    public function previewShipmentInvoice(Shipment $shipment): View
+    /**
+     * Digital HTML preview of the shipment invoice.
+     */
+    public function previewShipmentInvoice(Shipment $shipment): JsonResponse
     {
         $this->authorize('view', $shipment);
 
-        return view('pdf.shipment-invoice', $this->shipmentInvoiceViewData($shipment, true));
+        $data = $this->shipmentInvoiceViewData($shipment, true);
+        $html = view('pdf.shipment-invoice', $data)->render();
+
+        return response()->json([
+            'html' => $html,
+            'shipment_id' => $shipment->id,
+            'tracking' => $shipment->public_tracking,
+        ]);
     }
 
     public function shipmentInvoice(Shipment $shipment): Response
@@ -97,7 +117,7 @@ class PdfController extends Controller
      */
     private function shipmentInvoiceViewData(Shipment $shipment, bool $preview): array
     {
-        $shipment->load(['sender.locker', 'senderClient', 'recipient', 'deliveryRecipient', 'agency', 'status', 'items.originCountry', 'invoices', 'serviceType']);
+        $shipment->load(['sender.locker', 'senderClient', 'senderProfile', 'recipient', 'deliveryRecipient', 'recipientProfile', 'agency', 'status', 'items.originCountry', 'invoices', 'serviceType']);
 
         $doc = ShipmentDocumentSettings::merged();
         $invoice = $shipment->invoices->first();
@@ -122,7 +142,7 @@ class PdfController extends Controller
      */
     private function shipmentLabelViewData(Shipment $shipment, bool $preview): array
     {
-        $shipment->load(['sender.locker', 'senderClient', 'recipient', 'deliveryRecipient', 'agency', 'status', 'items.originCountry', 'invoices', 'serviceType']);
+        $shipment->load(['sender.locker', 'senderClient', 'senderProfile', 'recipient', 'deliveryRecipient', 'recipientProfile', 'agency', 'status', 'items.originCountry', 'invoices', 'serviceType']);
 
         $doc = ShipmentDocumentSettings::merged();
         $invoice = $shipment->invoices->first();

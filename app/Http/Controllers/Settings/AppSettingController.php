@@ -12,7 +12,8 @@ class AppSettingController extends Controller
 {
     private const IDENTITY_KEYS = [
         'site_name', 'site_url', 'site_email', 'nit', 'phone_fixed',
-        'phone_mobile', 'address', 'country', 'country_id', 'city', 'zip_code',
+        'phone_mobile', 'phone_fixed_secondary', 'phone_mobile_secondary',
+        'address', 'country', 'country_id', 'city', 'zip_code',
     ];
 
     private const LOCKER_KEYS = [
@@ -102,8 +103,10 @@ class AppSettingController extends Controller
             'site_url' => ['nullable', 'string', 'max:500'],
             'site_email' => ['nullable', 'email', 'max:255'],
             'nit' => ['nullable', 'string', 'max:64'],
-            'phone_fixed' => ['nullable', 'string', 'max:32'],
-            'phone_mobile' => ['nullable', 'string', 'max:32'],
+            'phone_fixed' => ['nullable', 'string', 'max:64'],
+            'phone_mobile' => ['nullable', 'string', 'max:64'],
+            'phone_fixed_secondary' => ['nullable', 'string', 'max:64'],
+            'phone_mobile_secondary' => ['nullable', 'string', 'max:64'],
             'address' => ['nullable', 'string', 'max:500'],
             'country' => ['nullable', 'string', 'max:100'],
             'country_id' => ['nullable', 'integer', 'exists:countries,id'],

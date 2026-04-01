@@ -8,8 +8,6 @@ use Illuminate\Http\Resources\Json\JsonResource;
 class UserResource extends JsonResource
 {
     /**
-     * Transform the resource into an array.
-     *
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array
@@ -20,9 +18,11 @@ class UserResource extends JsonResource
             'email' => $this->email,
             'email_verified_at' => $this->email_verified_at,
             'theme_preference' => $this->theme_preference,
+            'locker_number' => $this->locker_number,
             'roles' => $this->getRoleNames(),
             'permissions' => $this->getAllPermissions()->pluck('name'),
             'agency_id' => $this->agency_id ?? null,
+            'profile' => new ProfileResource($this->whenLoaded('profile')),
             'created_at' => $this->created_at,
         ];
     }

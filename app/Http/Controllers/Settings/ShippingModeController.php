@@ -71,6 +71,7 @@ class ShippingModeController extends Controller
             'description' => ['nullable', 'string', 'max:1000'],
             'is_active' => ['boolean'],
             'sort_order' => ['nullable', 'integer', 'min:0', 'max:65535'],
+            'volumetric_divisor' => ['nullable', 'integer', 'min:1', 'max:99999'],
             'delivery_times' => ['nullable', 'array'],
             'delivery_times.*.id' => ['nullable', 'integer', 'exists:delivery_times,id'],
             'delivery_times.*.label' => ['required', 'string', 'max:255'],

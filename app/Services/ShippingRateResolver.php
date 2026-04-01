@@ -25,6 +25,7 @@ class ShippingRateResolver
                 'shippingModes',
                 'originCountries',
                 'destinationCountries',
+                'agencies',
             ])
             ->get();
 
@@ -74,6 +75,14 @@ class ShippingRateResolver
 
     protected function agencyMatches(ShippingRate $rate, ?int $agencyId): bool
     {
+        $pivotIds = $rate->relationLoaded('agencies')
+            ? $rate->agencies->pluck('id')->map(fn ($id) => (int) $id)->all()
+            : $rate->agencies()->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+        if ($pivotIds !== []) {
+            return $agencyId !== null && in_array($agencyId, $pivotIds, true);
+        }
+
         if ($rate->agency_id === null) {
             return true;
         }
@@ -83,6 +92,14 @@ class ShippingRateResolver
 
     protected function agencySpecificity(ShippingRate $rate, ?int $agencyId): int
     {
+        $pivotIds = $rate->relationLoaded('agencies')
+            ? $rate->agencies->pluck('id')->map(fn ($id) => (int) $id)->all()
+            : $rate->agencies()->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+        if ($pivotIds !== []) {
+            return $agencyId !== null && in_array($agencyId, $pivotIds, true) ? 3 : 0;
+        }
+
         if ($rate->agency_id === null) {
             return 0;
         }

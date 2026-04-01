@@ -8,9 +8,13 @@ use Illuminate\Support\Facades\Schema;
 
 class LocationSeeder extends Seeder
 {
+    /**
+     * Dossier contenant countries.json, states.json, states+cities.json
+     * (à la racine du dépôt countries-states-cities-database, pas sous json/).
+     */
     private function jsonPath(): string
     {
-        return env('LOCATION_JSON_PATH', base_path('../countries-states-cities-database/json'));
+        return env('LOCATION_JSON_PATH', base_path('countries-states-cities-database'));
     }
 
     public function run(): void
@@ -126,7 +130,7 @@ class LocationSeeder extends Seeder
         DB::table('cities')->truncate();
         $this->command->info('Seeding cities (this may take a minute)…');
 
-        $csvFile = env('LOCATION_CSV_PATH', base_path('../countries-states-cities-database/csv')) . '/cities.csv';
+        $csvFile = rtrim((string) env('LOCATION_CSV_PATH', base_path('countries-states-cities-database/csv')), '/\\') . '/cities.csv';
         if (file_exists($csvFile)) {
             $this->seedCitiesFromCsv($csvFile);
         } else {

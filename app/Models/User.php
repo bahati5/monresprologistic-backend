@@ -5,16 +5,18 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, HasRoles, Notifiable;
+    use HasApiTokens, HasFactory, HasRoles, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -22,6 +24,7 @@ class User extends Authenticatable
      * @var list<string>
      */
     protected $fillable = [
+        'profile_id',
         'name',
         'first_name',
         'last_name',
@@ -29,6 +32,7 @@ class User extends Authenticatable
         'phone',
         'phone_mobile',
         'password',
+        'locker_number',
         'agency_id',
         'theme_preference',
         'can_view_all_agencies',
@@ -61,6 +65,23 @@ class User extends Authenticatable
             'password' => 'hashed',
             'can_view_all_agencies' => 'boolean',
         ];
+    }
+
+    public function profile(): BelongsTo
+    {
+        return $this->belongsTo(Profile::class);
+    }
+
+    public function savedContacts(): BelongsToMany
+    {
+        return $this->belongsToMany(Profile::class, 'address_books', 'owner_id', 'profile_id')
+            ->withPivot('id', 'alias', 'is_default', 'notes')
+            ->withTimestamps();
+    }
+
+    public function addressBookEntries(): HasMany
+    {
+        return $this->hasMany(AddressBook::class, 'owner_id');
     }
 
     public function agency(): BelongsTo

@@ -13,6 +13,7 @@ use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMode;
 use App\Models\ShipLine;
+use App\Models\ShipLineRate;
 use App\Models\Status;
 use App\Models\TransportCompany;
 use App\Models\User;
@@ -225,7 +226,7 @@ class ShipmentController extends Controller
                 ->where('is_active', true)
                 ->orderBy('name')
                 ->limit(500)
-                ->get(['id', 'name', 'code', 'iso2']),
+                ->get(['id', 'name', 'code', 'iso2', 'emoji']),
             'articleCategories' => ArticleCategory::query()->where('is_active', true)->orderBy('sort_order')->get(['id', 'name']),
             'agencies' => $agencies,
             'drivers' => $drivers,
@@ -267,6 +268,9 @@ class ShipmentController extends Controller
             'packaging_type_id' => ['nullable', 'exists:packaging_types,id'],
             'transport_company_id' => ['nullable', 'exists:transport_companies,id'],
             'ship_line_id' => ['nullable', 'exists:ship_lines,id'],
+            'origin_country_id' => ['nullable', 'integer', 'exists:countries,id'],
+            'dest_country_id' => ['nullable', 'integer', 'exists:countries,id'],
+            'ship_line_rate_id' => ['nullable', 'integer', 'exists:ship_line_rates,id'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.description' => ['required', 'string', 'max:255'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
@@ -348,6 +352,9 @@ class ShipmentController extends Controller
             'packaging_type_id' => ['nullable', 'exists:packaging_types,id'],
             'transport_company_id' => ['nullable', 'exists:transport_companies,id'],
             'ship_line_id' => ['nullable', 'exists:ship_lines,id'],
+            'origin_country_id' => ['nullable', 'integer', 'exists:countries,id'],
+            'dest_country_id' => ['nullable', 'integer', 'exists:countries,id'],
+            'ship_line_rate_id' => ['nullable', 'integer', 'exists:ship_line_rates,id'],
             'service_options' => ['nullable', 'array'],
             'service_options.manual_fee_label' => ['nullable', 'string', 'max:255'],
             'manual_fee' => ['nullable', 'numeric', 'min:0'],
@@ -406,12 +413,19 @@ class ShipmentController extends Controller
 
             $senderUserId = $crm->user_id;
 
+            $originC = isset($data['origin_country_id']) && $data['origin_country_id'] !== '' && $data['origin_country_id'] !== null
+                ? (int) $data['origin_country_id'] : null;
+            $destC = isset($data['dest_country_id']) && $data['dest_country_id'] !== '' && $data['dest_country_id'] !== null
+                ? (int) $data['dest_country_id'] : null;
+
             $shipment = Shipment::query()->create([
                 'sender_client_id' => $crm->id,
                 'sender_id' => $senderUserId,
                 'recipient_id' => $senderUserId,
                 'delivery_recipient_id' => $recipientRecord->id,
                 'agency_id' => $agencyId,
+                'origin_country_id' => $originC && $originC > 0 ? $originC : null,
+                'dest_country_id' => $destC && $destC > 0 ? $destC : null,
                 'status_id' => $resolvedStatusId,
                 'service_type_id' => null,
                 'assigned_driver_id' => $data['assigned_driver_id'] ?? null,
@@ -958,7 +972,23 @@ class ShipmentController extends Controller
     protected function computeWizardPricing(array $data, User $user, int $agencyId): array
     {
         $quotePayload = array_merge($data, ['agency_id' => $agencyId]);
-        $divisor = $this->volumetricDivisorValue();
+        $slrIdEarly = isset($data['ship_line_rate_id']) ? (int) $data['ship_line_rate_id'] : 0;
+        if ($slrIdEarly > 0) {
+            $earlyRate = ShipLineRate::query()->find($slrIdEarly);
+            if ($earlyRate && $earlyRate->is_active) {
+                if (empty($data['shipping_mode_id']) || $data['shipping_mode_id'] === '' || $data['shipping_mode_id'] === null) {
+                    $data['shipping_mode_id'] = $earlyRate->shipping_mode_id;
+                    $quotePayload['shipping_mode_id'] = $earlyRate->shipping_mode_id;
+                }
+                if (empty($data['delivery_time_id']) || $data['delivery_time_id'] === '' || $data['delivery_time_id'] === null) {
+                    if ($earlyRate->delivery_time_id) {
+                        $data['delivery_time_id'] = $earlyRate->delivery_time_id;
+                        $quotePayload['delivery_time_id'] = $earlyRate->delivery_time_id;
+                    }
+                }
+            }
+        }
+        $divisor = $this->resolveVolumetricDivisorForWizard($data);
 
         $realWeight = collect($data['items'])->sum(fn ($i) => (float) ($i['weight_kg'] ?? 0) * (int) ($i['quantity'] ?? 1));
         $volWeight = collect($data['items'])->sum(function ($i) use ($divisor) {
@@ -974,6 +1004,17 @@ class ShipmentController extends Controller
         });
 
         $billableWeight = max($realWeight, $volWeight);
+        $volumeM3 = collect($data['items'])->sum(function ($i) {
+            $l = (float) ($i['length_cm'] ?? 0) / 100;
+            $w = (float) ($i['width_cm'] ?? 0) / 100;
+            $h = (float) ($i['height_cm'] ?? 0) / 100;
+            $qty = (int) ($i['quantity'] ?? 1);
+            if ($l <= 0 || $w <= 0 || $h <= 0) {
+                return 0;
+            }
+
+            return $l * $w * $h * $qty;
+        });
         $declaredValue = $this->effectiveDeclaredValue($data);
         $insurancePct = (float) ($data['insurance_pct'] ?? 0);
         $customsDutyPct = (float) ($data['customs_duty_pct'] ?? 0);
@@ -999,7 +1040,7 @@ class ShipmentController extends Controller
         if ($manualPricing && $manualPricePerKg > 0) {
             $baseQuote = $billableWeight * $manualPricePerKg;
         } else {
-            $baseQuote = $this->quoteFromValidatedPayload($quotePayload, $user);
+            $baseQuote = $this->quoteFromValidatedPayload($quotePayload, $user, $divisor, $realWeight, $volWeight, $billableWeight, $volumeM3);
         }
 
         $insuranceAmount = $declaredValue > 0 ? round($declaredValue * $insurancePct / 100, 2) : 0;
@@ -1066,6 +1107,30 @@ class ShipmentController extends Controller
             }
         }
 
+        $ocid = isset($data['origin_country_id']) && $data['origin_country_id'] !== '' && $data['origin_country_id'] !== null
+            ? (int) $data['origin_country_id'] : 0;
+        if ($ocid > 0) {
+            $serviceOptions['origin_country_id'] = $ocid;
+        }
+        $dcid = isset($data['dest_country_id']) && $data['dest_country_id'] !== '' && $data['dest_country_id'] !== null
+            ? (int) $data['dest_country_id'] : 0;
+        if ($dcid > 0) {
+            $serviceOptions['dest_country_id'] = $dcid;
+        }
+        $slrid = isset($data['ship_line_rate_id']) && $data['ship_line_rate_id'] !== '' && $data['ship_line_rate_id'] !== null
+            ? (int) $data['ship_line_rate_id'] : 0;
+        if ($slrid > 0) {
+            $serviceOptions['ship_line_rate_id'] = $slrid;
+            $rateRow = ShipLineRate::query()->find($slrid);
+            if ($rateRow && $rateRow->ship_line_id > 0 && ($slid <= 0)) {
+                $sln = ShipLine::query()->where('is_active', true)->find($rateRow->ship_line_id);
+                if ($sln) {
+                    $serviceOptions['ship_line_id'] = (int) $rateRow->ship_line_id;
+                    $serviceOptions['ship_line_name'] = $sln->name;
+                }
+            }
+        }
+
         if (! empty($data['legal_declaration_accepted'])) {
             $serviceOptions['legal_declaration_accepted'] = true;
             $serviceOptions['legal_declaration_accepted_at'] = now()->toIso8601String();
@@ -1110,40 +1175,24 @@ class ShipmentController extends Controller
     /**
      * @param  array<string, mixed>  $data
      */
-    protected function quoteFromValidatedPayload(array $data, User $user): float
-    {
-        $divisor = $this->volumetricDivisorValue();
+    protected function quoteFromValidatedPayload(
+        array $data,
+        User $user,
+        float $divisor,
+        float $realWeight,
+        float $volWeight,
+        float $billableWeightKg,
+        float $volumeM3,
+    ): float {
         $agencyId = (int) ($data['agency_id'] ?? $user->agency_id);
         if (! $user->canAccessAllAgencies()) {
             $agencyId = (int) $user->agency_id;
         }
 
-        $realWeight = collect($data['items'])->sum(fn ($i) => (float) ($i['weight_kg'] ?? 0) * (int) ($i['quantity'] ?? 1));
-        $volWeight = collect($data['items'])->sum(function ($i) use ($divisor) {
-            $l = (float) ($i['length_cm'] ?? 0);
-            $w = (float) ($i['width_cm'] ?? 0);
-            $h = (float) ($i['height_cm'] ?? 0);
-            $qty = (int) ($i['quantity'] ?? 1);
-            if ($l <= 0 || $w <= 0 || $h <= 0) {
-                return 0;
-            }
-
-            return ($l * $w * $h / $divisor) * $qty;
-        });
-
-        $volumeM3 = collect($data['items'])->sum(function ($i) {
-            $l = (float) ($i['length_cm'] ?? 0) / 100;
-            $w = (float) ($i['width_cm'] ?? 0) / 100;
-            $h = (float) ($i['height_cm'] ?? 0) / 100;
-            $qty = (int) ($i['quantity'] ?? 1);
-            if ($l <= 0 || $w <= 0 || $h <= 0) {
-                return 0;
-            }
-
-            return $l * $w * $h * $qty;
-        });
-
-        $billableWeightKg = max($realWeight, $volWeight);
+        $fromLineRate = $this->tryShipLineRateBaseQuote($data, $billableWeightKg, $volumeM3);
+        if ($fromLineRate !== null) {
+            return $fromLineRate;
+        }
 
         $engineQuote = PricingEngine::forContext(
             agencyId: $agencyId,
@@ -1272,5 +1321,89 @@ class ShipmentController extends Controller
     protected function volumetricDivisorValue(): float
     {
         return max(1.0, (float) (\App\Models\Setting::getValue('volumetric_divisor', '5000') ?: 5000));
+    }
+
+    /**
+     * Repli : tarif ligne (rate) → mode → réglage global.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function resolveVolumetricDivisorForWizard(array $data): float
+    {
+        $global = $this->volumetricDivisorValue();
+        $slrId = isset($data['ship_line_rate_id']) ? (int) $data['ship_line_rate_id'] : 0;
+        if ($slrId > 0) {
+            $slr = ShipLineRate::query()->with('shippingMode')->find($slrId);
+            if ($slr && $slr->is_active) {
+                if ($slr->volumetric_divisor) {
+                    return max(1.0, (float) $slr->volumetric_divisor);
+                }
+                $mode = $slr->shippingMode;
+                if ($mode && $mode->volumetric_divisor) {
+                    return max(1.0, (float) $mode->volumetric_divisor);
+                }
+            }
+        }
+        $mid = isset($data['shipping_mode_id']) ? (int) $data['shipping_mode_id'] : 0;
+        if ($mid > 0) {
+            $mode = ShippingMode::query()->find($mid);
+            if ($mode && $mode->volumetric_divisor) {
+                return max(1.0, (float) $mode->volumetric_divisor);
+            }
+        }
+
+        return $global;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    protected function tryShipLineRateBaseQuote(array $data, float $billableWeightKg, float $volumeM3): ?float
+    {
+        $slrId = isset($data['ship_line_rate_id']) ? (int) $data['ship_line_rate_id'] : 0;
+        if ($slrId <= 0) {
+            return null;
+        }
+        $originId = isset($data['origin_country_id']) ? (int) $data['origin_country_id'] : 0;
+        $destId = isset($data['dest_country_id']) ? (int) $data['dest_country_id'] : 0;
+        if ($originId <= 0 || $destId <= 0) {
+            throw ValidationException::withMessages([
+                'origin_country_id' => ['Pays de départ et d’arrivée requis avec un tarif ligne.'],
+                'dest_country_id' => ['Pays de départ et d’arrivée requis avec un tarif ligne.'],
+            ]);
+        }
+        $slr = ShipLineRate::query()
+            ->where('is_active', true)
+            ->whereKey($slrId)
+            ->with(['shipLine.countryScopes', 'shippingMode'])
+            ->first();
+        if ($slr === null) {
+            return null;
+        }
+        $line = $slr->shipLine;
+        if ($line === null || ! $line->is_active) {
+            return null;
+        }
+        $scopes = $line->relationLoaded('countryScopes') ? $line->countryScopes : $line->countryScopes()->get();
+        $origins = $scopes->where('scope', 'origin')->pluck('country_id')->map(fn ($x) => (int) $x)->all();
+        $dests = $scopes->where('scope', 'destination')->pluck('country_id')->map(fn ($x) => (int) $x)->all();
+        if ($origins === [] || $dests === []) {
+            throw ValidationException::withMessages([
+                'ship_line_rate_id' => ['Ligne d’expédition incomplète (pays manquants).'],
+            ]);
+        }
+        if (! in_array($originId, $origins, true) || ! in_array($destId, $dests, true)) {
+            throw ValidationException::withMessages([
+                'ship_line_rate_id' => ['Ce tarif ne correspond pas à la paire pays départ / arrivée.'],
+            ]);
+        }
+        $smid = isset($data['shipping_mode_id']) ? (int) $data['shipping_mode_id'] : 0;
+        if ($smid > 0 && $smid !== (int) $slr->shipping_mode_id) {
+            throw ValidationException::withMessages([
+                'shipping_mode_id' => ['Le mode d’expédition ne correspond pas au tarif ligne sélectionné.'],
+            ]);
+        }
+
+        return $slr->computeBaseQuote($billableWeightKg, $volumeM3);
     }
 }

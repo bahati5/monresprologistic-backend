@@ -6,11 +6,11 @@ use App\Http\Controllers\Concerns\DenormalizesRecipientLocation;
 use App\Http\Controllers\Concerns\NormalizesOptionalEmail;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\InteractsWithAgencyVisibility;
+use App\Models\AddressBook;
 use App\Models\Agency;
-use App\Models\CrmClient;
 use App\Models\DeliveryTime;
 use App\Models\Locker;
-use App\Models\Recipient;
+use App\Models\Profile;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -27,26 +27,18 @@ class ShipmentWizardController extends Controller
     use InteractsWithAgencyVisibility;
 
     /**
-     * Recherche fiches clients CRM (avec ou sans compte portail).
+     * Recherche fiches clients (Profiles avec agency_id, possiblement avec compte portail).
      */
     public function searchClients(Request $request): JsonResponse
     {
         $request->validate(['q' => ['required', 'string', 'min:1']]);
 
         $user = $request->user();
-        $term = '%' . $request->input('q') . '%';
 
-        $query = CrmClient::query()
-            ->where(function ($q) use ($term) {
-                $q->where('first_name', 'like', $term)
-                    ->orWhere('last_name', 'like', $term)
-                    ->orWhere('email', 'like', $term)
-                    ->orWhere('phone', 'like', $term)
-                    ->orWhere('phone_mobile', 'like', $term)
-                    ->orWhereRaw("CONCAT(first_name, ' ', last_name) like ?", [$term])
-                    ->orWhereHas('locker', fn ($l) => $l->where('code', 'like', $term));
-            })
-            ->with(['locker', 'user'])
+        $query = Profile::query()
+            ->whereNotNull('agency_id')
+            ->search($request->input('q'))
+            ->with(['user'])
             ->limit(20);
 
         if (! $user->canAccessAllAgencies()) {
@@ -56,51 +48,89 @@ class ShipmentWizardController extends Controller
         $rows = $query->get();
 
         return response()->json(
-            $rows->map(fn (CrmClient $c) => [
-                'id' => $c->id,
-                'name' => $c->display_name,
-                'email' => $c->email ?? $c->user?->email ?? '',
-                'phone' => $c->phone,
-                'locker_code' => $c->locker?->code,
-                'has_portal' => $c->user_id !== null,
+            $rows->map(fn (Profile $p) => [
+                'id' => $p->id,
+                'name' => $p->full_name,
+                'email' => $p->email ?? $p->user?->email ?? '',
+                'phone' => $p->phone,
+                'locker_code' => $p->user?->locker_number ?? Locker::where('profile_id', $p->id)->value('code'),
+                'has_portal' => $p->user !== null,
             ])
         );
     }
 
     /**
-     * Destinataires filtrés par fiche client CRM (paramètre client_id = id CRM).
+     * Destinataires filtres par carnet d'adresses du client (via address_books + profiles).
      */
     public function searchRecipients(Request $request): JsonResponse
     {
         $request->validate([
             'q' => ['required', 'string', 'min:1'],
-            'client_id' => ['nullable', 'exists:crm_clients,id'],
+            'client_id' => ['nullable', 'exists:profiles,id'],
         ]);
 
         $term = '%' . $request->input('q') . '%';
-        $crmClientId = $request->input('client_id');
+        $clientProfileId = $request->input('client_id');
 
-        $query = Recipient::query()
-            ->where('is_active', true)
-            ->where(function ($q) use ($term) {
-                $q->where('name', 'like', $term)
-                    ->orWhere('email', 'like', $term)
-                    ->orWhere('phone', 'like', $term)
-                    ->orWhere('city', 'like', $term);
-            })
-            ->limit(20);
+        if ($clientProfileId) {
+            $clientProfile = Profile::find($clientProfileId);
+            $ownerId = $clientProfile?->user?->id;
 
-        if ($crmClientId) {
-            $query->where('crm_client_id', $crmClientId);
+            if (! $ownerId) {
+                return response()->json([]);
+            }
+
+            $query = AddressBook::query()
+                ->where('owner_id', $ownerId)
+                ->whereHas('profile', function ($q) use ($term) {
+                    $q->where('is_active', true)
+                        ->where(function ($inner) use ($term) {
+                            $inner->where('first_name', 'like', $term)
+                                ->orWhere('last_name', 'like', $term)
+                                ->orWhere('email', 'like', $term)
+                                ->orWhere('phone', 'like', $term)
+                                ->orWhereRaw("CONCAT(first_name, ' ', last_name) like ?", [$term]);
+                        });
+                })
+                ->with(['profile.city', 'profile.country'])
+                ->limit(20);
+
+            $entries = $query->get();
+
+            return response()->json(
+                $entries->map(fn (AddressBook $e) => [
+                    'id' => $e->profile->id,
+                    'address_book_id' => $e->id,
+                    'name' => $e->profile->full_name,
+                    'email' => $e->profile->email,
+                    'phone' => $e->profile->phone,
+                    'city' => $e->profile->city?->name ?? '',
+                    'country' => $e->profile->country?->name ?? '',
+                ])
+            );
         }
 
-        $recipients = $query->get(['id', 'crm_client_id', 'user_id', 'name', 'email', 'phone', 'city', 'country']);
+        $profiles = Profile::query()
+            ->where('is_active', true)
+            ->search($request->input('q'))
+            ->with(['city', 'country'])
+            ->limit(20)
+            ->get();
 
-        return response()->json($recipients);
+        return response()->json(
+            $profiles->map(fn (Profile $p) => [
+                'id' => $p->id,
+                'name' => $p->full_name,
+                'email' => $p->email,
+                'phone' => $p->phone,
+                'city' => $p->city?->name ?? '',
+                'country' => $p->country?->name ?? '',
+            ])
+        );
     }
 
     /**
-     * Création rapide d’une fiche client (+ portail optionnel).
+     * Creation rapide d'une fiche client (Profile + portail optionnel).
      */
     public function quickCreateClient(Request $request): JsonResponse
     {
@@ -119,72 +149,92 @@ class ShipmentWizardController extends Controller
                 'nullable',
                 'email',
                 'max:255',
-                Rule::unique('users', 'email'),
             ],
-            'phone' => ['required', 'string', 'max:32'],
-            'phone_mobile' => ['nullable', 'string', 'max:32'],
+            'phone' => ['required', 'string', 'max:64'],
+            'phone_secondary' => ['nullable', 'string', 'max:64'],
             'password' => [
                 Rule::requiredIf($createPortal),
                 'nullable',
                 Rules\Password::defaults(),
             ],
-            'billing_address' => ['nullable', 'string', 'max:500'],
-            'billing_postal_code' => ['nullable', 'string', 'max:16'],
-            'billing_country_id' => ['required', 'integer', 'exists:countries,id'],
-            'billing_state_id' => [
+            'address' => ['nullable', 'string', 'max:500'],
+            'landmark' => ['nullable', 'string', 'max:500'],
+            'zip_code' => ['nullable', 'string', 'max:16'],
+            'country_id' => ['required', 'integer', 'exists:countries,id'],
+            'state_id' => [
                 'required',
                 'integer',
-                Rule::exists('states', 'id')->where('country_id', $request->integer('billing_country_id')),
+                Rule::exists('states', 'id')->where('country_id', $request->integer('country_id')),
             ],
-            'billing_city_id' => [
+            'city_id' => [
                 'required',
                 'integer',
-                Rule::exists('cities', 'id')->where('state_id', $request->integer('billing_state_id')),
+                Rule::exists('cities', 'id')->where('state_id', $request->integer('state_id')),
             ],
         ]);
 
         $authUser = $request->user();
-
-        $crm = null;
+        $profile = null;
         $portalUser = null;
 
-        DB::transaction(function () use ($data, $createPortal, $authUser, &$crm, &$portalUser) {
-            $crm = CrmClient::create([
-                'first_name' => $data['first_name'],
-                'last_name' => $data['last_name'],
-                'email' => $createPortal ? $data['email'] : ($data['email'] ?? null),
-                'phone' => $data['phone'],
-                'phone_mobile' => $data['phone_mobile'] ?? null,
-                'agency_id' => $authUser->agency_id,
-                'billing_address' => $data['billing_address'] ?? null,
-                'billing_postal_code' => $data['billing_postal_code'] ?? null,
-                'billing_country_id' => $data['billing_country_id'],
-                'billing_state_id' => $data['billing_state_id'],
-                'billing_city_id' => $data['billing_city_id'],
-                'user_id' => null,
-                'is_active' => true,
-            ]);
+        DB::transaction(function () use ($data, $createPortal, $authUser, &$profile, &$portalUser) {
+            $existing = null;
+            if (! empty($data['email'])) {
+                $existing = Profile::where('email', $data['email'])->first();
+            }
+            if (! $existing && ! empty($data['phone'])) {
+                $existing = Profile::where('phone', $data['phone'])->first();
+            }
 
-            if ($createPortal) {
+            if ($existing) {
+                $profile = $existing;
+                $profile->update([
+                    'first_name' => $data['first_name'],
+                    'last_name' => $data['last_name'],
+                    'agency_id' => $authUser->agency_id,
+                    'address' => $data['address'] ?? $profile->address,
+                    'landmark' => $data['landmark'] ?? $profile->landmark,
+                    'zip_code' => $data['zip_code'] ?? $profile->zip_code,
+                    'country_id' => $data['country_id'],
+                    'state_id' => $data['state_id'],
+                    'city_id' => $data['city_id'],
+                    'phone' => $data['phone'],
+                    'phone_secondary' => $data['phone_secondary'] ?? null,
+                    'email' => $data['email'] ?? $profile->email,
+                ]);
+            } else {
+                $profile = Profile::create([
+                    'first_name' => $data['first_name'],
+                    'last_name' => $data['last_name'],
+                    'email' => $data['email'] ?? null,
+                    'phone' => $data['phone'],
+                    'phone_secondary' => $data['phone_secondary'] ?? null,
+                    'address' => $data['address'] ?? null,
+                    'landmark' => $data['landmark'] ?? null,
+                    'zip_code' => $data['zip_code'] ?? null,
+                    'country_id' => $data['country_id'],
+                    'state_id' => $data['state_id'],
+                    'city_id' => $data['city_id'],
+                    'agency_id' => $authUser->agency_id,
+                    'is_active' => true,
+                ]);
+            }
+
+            if ($createPortal && ! $profile->user) {
                 $fullName = trim($data['first_name'] . ' ' . $data['last_name']);
                 $portalUser = User::create([
+                    'profile_id' => $profile->id,
                     'name' => $fullName,
                     'first_name' => $data['first_name'],
                     'last_name' => $data['last_name'],
                     'email' => $data['email'],
                     'phone' => $data['phone'],
-                    'phone_mobile' => $data['phone_mobile'] ?? null,
-                    'billing_address' => $data['billing_address'] ?? null,
-                    'billing_postal_code' => $data['billing_postal_code'] ?? null,
-                    'billing_country_id' => $data['billing_country_id'],
-                    'billing_state_id' => $data['billing_state_id'],
-                    'billing_city_id' => $data['billing_city_id'],
+                    'phone_mobile' => $data['phone_secondary'] ?? null,
                     'password' => Hash::make($data['password']),
                     'agency_id' => $authUser->agency_id,
                     'email_verified_at' => now(),
                 ]);
                 $portalUser->assignRole('client');
-                $crm->update(['user_id' => $portalUser->id]);
             }
 
             $prefix = Setting::getValue('locker_prefix', 'MRP');
@@ -205,35 +255,40 @@ class ShipmentWizardController extends Controller
             $formatted = str_replace('{{locker_code}}', $code, $template);
 
             Locker::create([
-                'crm_client_id' => $crm->id,
+                'profile_id' => $profile->id,
                 'user_id' => $portalUser?->id,
                 'code' => $code,
                 'formatted_address' => $formatted,
             ]);
+
+            if ($portalUser) {
+                $portalUser->update(['locker_number' => $code]);
+            }
         });
 
-        $crm->load('locker');
+        $profile->load('user');
 
         return response()->json([
-            'id' => $crm->id,
-            'name' => $crm->display_name,
-            'email' => $crm->email ?? $crm->user?->email ?? '',
-            'phone' => $crm->phone,
-            'locker_code' => $crm->locker?->code,
-            'has_portal' => $crm->user_id !== null,
+            'id' => $profile->id,
+            'name' => $profile->full_name,
+            'email' => $profile->email ?? $profile->user?->email ?? '',
+            'phone' => $profile->phone,
+            'locker_code' => $profile->user?->locker_number ?? Locker::where('profile_id', $profile->id)->value('code'),
+            'has_portal' => $profile->user !== null,
         ], 201);
     }
 
     /**
-     * Création rapide d’un destinataire rattaché à une fiche CRM.
+     * Creation rapide d'un destinataire (Profile + address_book entry).
      */
     public function quickCreateRecipient(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
+            'first_name' => ['required', 'string', 'max:120'],
+            'last_name' => ['required', 'string', 'max:120'],
             'email' => ['nullable', 'email', 'max:255'],
-            'phone' => ['required', 'string', 'max:32'],
-            'phone_secondary' => ['nullable', 'string', 'max:32'],
+            'phone' => ['required', 'string', 'max:64'],
+            'phone_secondary' => ['nullable', 'string', 'max:64'],
             'address' => ['nullable', 'string', 'max:500'],
             'landmark' => ['nullable', 'string', 'max:500'],
             'zip_code' => ['nullable', 'string', 'max:16'],
@@ -248,41 +303,75 @@ class ShipmentWizardController extends Controller
                 'integer',
                 Rule::exists('cities', 'id')->where('state_id', $request->integer('state_id')),
             ],
-            'crm_client_id' => ['required', 'exists:crm_clients,id'],
+            'client_profile_id' => ['required', 'exists:profiles,id'],
         ]);
 
         $authUser = $request->user();
-        $crm = CrmClient::query()->findOrFail($data['crm_client_id']);
-        if (! $authUser->canAccessAllAgencies() && (int) $crm->agency_id !== (int) $authUser->agency_id) {
+        $clientProfile = Profile::findOrFail($data['client_profile_id']);
+
+        if (! $authUser->canAccessAllAgencies() && (int) $clientProfile->agency_id !== (int) $authUser->agency_id) {
             abort(403);
         }
 
-        $crmId = $data['crm_client_id'];
-        unset($data['crm_client_id']);
+        $ownerId = $clientProfile->user?->id;
 
-        $this->denormalizeRecipientLocationFromCityId($data);
+        $result = DB::transaction(function () use ($data, $ownerId, $clientProfile) {
+            $profile = null;
 
-        $recipient = Recipient::create([
-            ...$data,
-            'crm_client_id' => $crmId,
-            'user_id' => $crm->user_id,
-        ]);
+            if (! empty($data['email'])) {
+                $profile = Profile::where('email', $data['email'])->first();
+            }
+            if (! $profile && ! empty($data['phone'])) {
+                $profile = Profile::where('phone', $data['phone'])->first();
+            }
+
+            if (! $profile) {
+                $profile = Profile::create([
+                    'first_name' => $data['first_name'],
+                    'last_name' => $data['last_name'],
+                    'email' => $data['email'] ?? null,
+                    'phone' => $data['phone'],
+                    'phone_secondary' => $data['phone_secondary'] ?? null,
+                    'address' => $data['address'] ?? null,
+                    'landmark' => $data['landmark'] ?? null,
+                    'zip_code' => $data['zip_code'] ?? null,
+                    'country_id' => $data['country_id'],
+                    'state_id' => $data['state_id'],
+                    'city_id' => $data['city_id'],
+                    'agency_id' => $clientProfile->agency_id,
+                    'is_active' => true,
+                ]);
+            }
+
+            if ($ownerId) {
+                $exists = AddressBook::where('owner_id', $ownerId)
+                    ->where('profile_id', $profile->id)
+                    ->exists();
+
+                if (! $exists) {
+                    AddressBook::create([
+                        'owner_id' => $ownerId,
+                        'profile_id' => $profile->id,
+                        'is_default' => false,
+                    ]);
+                }
+            }
+
+            return $profile;
+        });
+
+        $result->load('city', 'country');
 
         return response()->json([
-            'id' => $recipient->id,
-            'crm_client_id' => $recipient->crm_client_id,
-            'user_id' => $recipient->user_id,
-            'name' => $recipient->name,
-            'email' => $recipient->email,
-            'phone' => $recipient->phone,
-            'city' => $recipient->city,
-            'country' => $recipient->country,
+            'id' => $result->id,
+            'name' => $result->full_name,
+            'email' => $result->email,
+            'phone' => $result->phone,
+            'city' => $result->city?->name ?? '',
+            'country' => $result->country?->name ?? '',
         ], 201);
     }
 
-    /**
-     * Création rapide d’un délai de livraison pour un mode d’expédition (assistant expédition).
-     */
     public function quickCreateDeliveryTime(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -310,8 +399,78 @@ class ShipmentWizardController extends Controller
     }
 
     /**
-     * Get agencies list for dropdown.
+     * Unified profile search for both Sender and Recipient comboboxes.
+     *
+     * - q:          search term (name, email, phone)
+     * - exclude_id: profile_id to omit (the already-selected sender)
+     * - related_to: profile_id of the sender — results in their address book
+     *               are sorted first and flagged with is_related=true
      */
+    public function searchProfiles(Request $request): JsonResponse
+    {
+        $request->validate([
+            'q' => ['required', 'string', 'min:1'],
+            'exclude_id' => ['nullable', 'integer'],
+            'related_to' => ['nullable', 'integer'],
+        ]);
+
+        $user = $request->user();
+        $excludeId = $request->integer('exclude_id');
+        $relatedTo = $request->integer('related_to');
+
+        $relatedProfileIds = collect();
+
+        if ($relatedTo) {
+            $relatedProfile = Profile::find($relatedTo);
+            $ownerUser = $relatedProfile?->user;
+
+            if ($ownerUser) {
+                $relatedProfileIds = AddressBook::where('owner_id', $ownerUser->id)
+                    ->pluck('profile_id');
+            }
+        }
+
+        $query = Profile::query()
+            ->where('is_active', true)
+            ->search($request->input('q'))
+            ->with(['user', 'city', 'country']);
+
+        if ($excludeId) {
+            $query->where('id', '!=', $excludeId);
+        }
+
+        if (! $user->canAccessAllAgencies()) {
+            $query->where(function ($q) use ($user) {
+                $q->where('agency_id', $user->agency_id)
+                    ->orWhereNull('agency_id');
+            });
+        }
+
+        if ($relatedProfileIds->isNotEmpty()) {
+            $ids = $relatedProfileIds->implode(',');
+            $query->orderByRaw("FIELD(id, {$ids}) DESC");
+        }
+
+        $profiles = $query->limit(20)->get();
+
+        return response()->json(
+            $profiles->map(fn (Profile $p) => [
+                'id' => $p->id,
+                'first_name' => $p->first_name,
+                'last_name' => $p->last_name,
+                'full_name' => $p->full_name,
+                'email' => $p->email,
+                'phone' => $p->phone,
+                'city' => $p->city?->name,
+                'country' => $p->country?->name,
+                'country_id' => $p->country_id,
+                'has_account' => $p->user !== null,
+                'locker_number' => $p->user?->locker_number,
+                'is_related' => $relatedProfileIds->contains($p->id),
+            ])
+        );
+    }
+
     public function agencies(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -323,5 +482,13 @@ class ShipmentWizardController extends Controller
         }
 
         return response()->json($agencies);
+    }
+
+    /**
+     * Lignes d'expédition actives couvrant la paire pays départ / arrivée (même logique que Paramètres).
+     */
+    public function shipLinesForRoute(Request $request): JsonResponse
+    {
+        return app(\App\Http\Controllers\Settings\ShipLineController::class)->forRoute($request);
     }
 }

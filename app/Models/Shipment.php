@@ -12,9 +12,13 @@ class Shipment extends Model
         'public_tracking',
         'sender_id',
         'sender_client_id',
+        'sender_profile_id',
         'recipient_id',
         'delivery_recipient_id',
+        'recipient_profile_id',
         'agency_id',
+        'origin_country_id',
+        'dest_country_id',
         'status_id',
         'service_type_id',
         'consolidation_id',
@@ -67,6 +71,16 @@ class Shipment extends Model
     public function senderClient(): BelongsTo
     {
         return $this->belongsTo(CrmClient::class, 'sender_client_id');
+    }
+
+    public function senderProfile(): BelongsTo
+    {
+        return $this->belongsTo(Profile::class, 'sender_profile_id');
+    }
+
+    public function recipientProfile(): BelongsTo
+    {
+        return $this->belongsTo(Profile::class, 'recipient_profile_id');
     }
 
     /**

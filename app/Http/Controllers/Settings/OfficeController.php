@@ -29,6 +29,7 @@ class OfficeController extends Controller
             'country' => ['nullable', 'string', 'max:255'],
             'contact_name' => ['nullable', 'string', 'max:255'],
             'contact_phone' => ['nullable', 'string', 'max:64'],
+            'contact_phone_secondary' => ['nullable', 'string', 'max:64'],
             'contact_email' => ['nullable', 'email', 'max:255'],
             'is_active' => ['boolean'],
         ]);
@@ -48,6 +49,7 @@ class OfficeController extends Controller
             'country' => ['nullable', 'string', 'max:255'],
             'contact_name' => ['nullable', 'string', 'max:255'],
             'contact_phone' => ['nullable', 'string', 'max:64'],
+            'contact_phone_secondary' => ['nullable', 'string', 'max:64'],
             'contact_email' => ['nullable', 'email', 'max:255'],
             'is_active' => ['boolean'],
         ]);

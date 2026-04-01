@@ -2,14 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\ProfileResource;
 use App\Models\Agency;
-use App\Models\CrmClient;
 use App\Models\Invoice;
 use App\Models\Locker;
+use App\Models\Profile;
+use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules;
@@ -22,25 +25,18 @@ class ClientController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $query = CrmClient::query()
-            ->with(['agency', 'locker', 'user'])
-            ->withCount(['recipients']);
+
+        $query = Profile::query()
+            ->whereNotNull('agency_id')
+            ->with(['agency', 'user', 'city', 'state', 'country'])
+            ->withCount(['savedByUsers as address_book_count']);
 
         if (! $user->canAccessAllAgencies()) {
             $query->where('agency_id', $user->agency_id);
         }
 
         if ($request->filled('search')) {
-            $search = $request->input('search');
-            $query->where(function ($q) use ($search) {
-                $q->where('first_name', 'like', "%{$search}%")
-                    ->orWhere('last_name', 'like', "%{$search}%")
-                    ->orWhere('email', 'like', "%{$search}%")
-                    ->orWhere('phone', 'like', "%{$search}%")
-                    ->orWhere('phone_mobile', 'like', "%{$search}%")
-                    ->orWhereRaw("CONCAT(first_name, ' ', last_name) like ?", ["%{$search}%"])
-                    ->orWhereHas('locker', fn ($l) => $l->where('code', 'like', "%{$search}%"));
-            });
+            $query->search($request->input('search'));
         }
 
         if ($request->filled('agency_id')) {
@@ -48,55 +44,55 @@ class ClientController extends Controller
         }
 
         if ($request->filled('status')) {
-            if ($request->input('status') === 'active') {
-                $query->where('is_active', true);
-            } else {
-                $query->where('is_active', false);
-            }
+            $query->where('is_active', $request->input('status') === 'active');
         }
 
         if ($request->filled('portal')) {
             if ($request->input('portal') === 'yes') {
-                $query->whereNotNull('user_id');
+                $query->whereHas('user');
             } elseif ($request->input('portal') === 'no') {
-                $query->whereNull('user_id');
+                $query->whereDoesntHave('user');
             }
         }
 
         $clients = $query->latest()->paginate(25)->withQueryString();
 
         return response()->json([
-            'clients' => $clients,
+            'clients' => ProfileResource::collection($clients),
+            'meta' => [
+                'current_page' => $clients->currentPage(),
+                'last_page' => $clients->lastPage(),
+                'per_page' => $clients->perPage(),
+                'total' => $clients->total(),
+            ],
             'filters' => $request->only(['search', 'agency_id', 'status', 'portal']),
             'agencies' => $this->getAgencies($user),
         ]);
     }
 
-    public function show(Request $request, CrmClient $client): JsonResponse
+    public function show(Request $request, Profile $client): JsonResponse
     {
         $this->authorizeAgency($request->user(), $client);
 
-        $client->load(['agency', 'locker', 'user', 'billingCountry', 'billingState', 'billingCity', 'recipients']);
+        $client->load(['agency', 'user', 'city', 'state', 'country']);
 
         $shipments = Shipment::query()
-            ->where('sender_client_id', $client->id)
+            ->where('sender_profile_id', $client->id)
             ->with(['status'])
             ->latest()
             ->take(20)
             ->get();
 
-        $invoices = $client->user_id
-            ? Invoice::query()
-                ->where('user_id', $client->user_id)
-                ->latest()
-                ->take(20)
-                ->get()
+        $userId = $client->user?->id;
+
+        $invoices = $userId
+            ? Invoice::query()->where('user_id', $userId)->latest()->take(20)->get()
             : collect();
 
-        $financeSummary = $client->user_id ? [
-            'total_invoiced' => Invoice::where('user_id', $client->user_id)->sum('amount'),
-            'total_paid' => Invoice::where('user_id', $client->user_id)->where('status', 'paid')->sum('amount'),
-            'total_pending' => Invoice::where('user_id', $client->user_id)->where('status', 'pending')->sum('amount'),
+        $financeSummary = $userId ? [
+            'total_invoiced' => Invoice::where('user_id', $userId)->sum('amount'),
+            'total_paid' => Invoice::where('user_id', $userId)->where('status', 'paid')->sum('amount'),
+            'total_pending' => Invoice::where('user_id', $userId)->where('status', 'pending')->sum('amount'),
         ] : [
             'total_invoiced' => 0,
             'total_paid' => 0,
@@ -104,7 +100,7 @@ class ClientController extends Controller
         ];
 
         return response()->json([
-            'client' => $client,
+            'client' => new ProfileResource($client),
             'shipments' => $shipments,
             'invoices' => $invoices,
             'financeSummary' => $financeSummary,
@@ -128,108 +124,125 @@ class ClientController extends Controller
                 'nullable',
                 'email',
                 'max:255',
-                Rule::unique('users', 'email'),
             ],
-            'phone' => ['required', 'string', 'max:32'],
-            'phone_mobile' => ['nullable', 'string', 'max:32'],
+            'phone' => ['required', 'string', 'max:64'],
+            'phone_secondary' => ['nullable', 'string', 'max:64'],
             'password' => [
                 Rule::requiredIf($createPortal),
                 'nullable',
                 Rules\Password::defaults(),
             ],
             'agency_id' => ['nullable', 'exists:agencies,id'],
-            'billing_address' => ['nullable', 'string', 'max:500'],
-            'billing_postal_code' => ['nullable', 'string', 'max:16'],
-            'billing_country_id' => ['required', 'integer', 'exists:countries,id'],
-            'billing_state_id' => [
+            'address' => ['nullable', 'string', 'max:500'],
+            'landmark' => ['nullable', 'string', 'max:500'],
+            'zip_code' => ['nullable', 'string', 'max:16'],
+            'country_id' => ['required', 'integer', 'exists:countries,id'],
+            'state_id' => [
                 'required',
                 'integer',
-                Rule::exists('states', 'id')->where('country_id', $request->integer('billing_country_id')),
+                Rule::exists('states', 'id')->where('country_id', $request->integer('country_id')),
             ],
-            'billing_city_id' => [
+            'city_id' => [
                 'required',
                 'integer',
-                Rule::exists('cities', 'id')->where('state_id', $request->integer('billing_state_id')),
+                Rule::exists('cities', 'id')->where('state_id', $request->integer('state_id')),
             ],
         ]);
 
         $agencyId = $data['agency_id'] ?? $request->user()->agency_id;
-
-        $crm = null;
+        $profile = null;
         $portalUser = null;
 
-        \Illuminate\Support\Facades\DB::transaction(function () use ($data, $createPortal, $agencyId, $request, &$crm, &$portalUser) {
-            $crm = CrmClient::create([
-                'first_name' => $data['first_name'],
-                'last_name' => $data['last_name'],
-                'email' => $createPortal ? $data['email'] : ($data['email'] ?? null),
-                'phone' => $data['phone'],
-                'phone_mobile' => $data['phone_mobile'] ?? null,
-                'agency_id' => $agencyId,
-                'billing_address' => $data['billing_address'] ?? null,
-                'billing_postal_code' => $data['billing_postal_code'] ?? null,
-                'billing_country_id' => $data['billing_country_id'],
-                'billing_state_id' => $data['billing_state_id'],
-                'billing_city_id' => $data['billing_city_id'],
-                'user_id' => null,
-                'is_active' => true,
-            ]);
+        DB::transaction(function () use ($data, $createPortal, $agencyId, &$profile, &$portalUser) {
+            $existingProfile = null;
+            if (! empty($data['email'])) {
+                $existingProfile = Profile::where('email', $data['email'])->first();
+            }
+            if (! $existingProfile && ! empty($data['phone'])) {
+                $existingProfile = Profile::where('phone', $data['phone'])->first();
+            }
 
-            if ($createPortal) {
+            if ($existingProfile) {
+                $profile = $existingProfile;
+                $profile->update([
+                    'first_name' => $data['first_name'],
+                    'last_name' => $data['last_name'],
+                    'email' => $data['email'] ?? $profile->email,
+                    'phone' => $data['phone'],
+                    'phone_secondary' => $data['phone_secondary'] ?? null,
+                    'address' => $data['address'] ?? null,
+                    'landmark' => $data['landmark'] ?? null,
+                    'zip_code' => $data['zip_code'] ?? null,
+                    'country_id' => $data['country_id'],
+                    'state_id' => $data['state_id'],
+                    'city_id' => $data['city_id'],
+                    'agency_id' => $agencyId,
+                    'is_active' => true,
+                ]);
+            } else {
+                $profile = Profile::create([
+                    'first_name' => $data['first_name'],
+                    'last_name' => $data['last_name'],
+                    'email' => $data['email'] ?? null,
+                    'phone' => $data['phone'],
+                    'phone_secondary' => $data['phone_secondary'] ?? null,
+                    'address' => $data['address'] ?? null,
+                    'landmark' => $data['landmark'] ?? null,
+                    'zip_code' => $data['zip_code'] ?? null,
+                    'country_id' => $data['country_id'],
+                    'state_id' => $data['state_id'],
+                    'city_id' => $data['city_id'],
+                    'agency_id' => $agencyId,
+                    'is_active' => true,
+                ]);
+            }
+
+            if ($createPortal && ! $profile->user) {
                 $fullName = trim($data['first_name'] . ' ' . $data['last_name']);
                 $portalUser = User::create([
+                    'profile_id' => $profile->id,
                     'name' => $fullName,
                     'first_name' => $data['first_name'],
                     'last_name' => $data['last_name'],
                     'email' => $data['email'],
                     'phone' => $data['phone'],
-                    'phone_mobile' => $data['phone_mobile'] ?? null,
-                    'billing_address' => $data['billing_address'] ?? null,
-                    'billing_postal_code' => $data['billing_postal_code'] ?? null,
-                    'billing_country_id' => $data['billing_country_id'],
-                    'billing_state_id' => $data['billing_state_id'],
-                    'billing_city_id' => $data['billing_city_id'],
+                    'phone_mobile' => $data['phone_secondary'] ?? null,
                     'password' => Hash::make($data['password']),
                     'agency_id' => $agencyId,
                     'email_verified_at' => now(),
                 ]);
                 $portalUser->assignRole('client');
-                $crm->update(['user_id' => $portalUser->id]);
             }
 
-            $prefix = \App\Models\Setting::getValue('locker_prefix', 'MRP');
-            $digits = (int) \App\Models\Setting::getValue('locker_digits', '4');
-            $mode = \App\Models\Setting::getValue('locker_mode', 'random');
-
-            if ($mode === 'sequential') {
-                $last = Locker::query()->orderByDesc('id')->value('code');
-                $lastNum = $last ? (int) preg_replace('/\D/', '', $last) : 0;
-                $code = $prefix . '-' . str_pad($lastNum + 1, $digits, '0', STR_PAD_LEFT);
-            } else {
-                do {
-                    $code = $prefix . '-' . str_pad(random_int(0, pow(10, $digits) - 1), $digits, '0', STR_PAD_LEFT);
-                } while (Locker::where('code', $code)->exists());
-            }
-
-            $template = \App\Models\Setting::getValue('locker_address_template', '');
-            $formatted = str_replace('{{locker_code}}', $code, $template);
+            $lockerNumber = $this->generateLockerNumber();
 
             Locker::create([
-                'crm_client_id' => $crm->id,
+                'profile_id' => $profile->id,
                 'user_id' => $portalUser?->id,
-                'code' => $code,
-                'formatted_address' => $formatted,
+                'code' => $lockerNumber,
+                'formatted_address' => str_replace(
+                    '{{locker_code}}',
+                    $lockerNumber,
+                    Setting::getValue('locker_address_template', '')
+                ),
             ]);
+
+            if ($portalUser) {
+                $portalUser->update(['locker_number' => $lockerNumber]);
+            }
         });
 
-        $crm->load('locker');
+        $profile->load('user');
+        $lockerCode = Locker::where('profile_id', $profile->id)->value('code') ?? '';
         $suffix = $createPortal ? ' (compte portail créé)' : ' (sans compte portail)';
-        $code = $crm->locker?->code ?? '';
 
-        return back()->with('success', 'Fiche client créée avec casier ' . $code . $suffix);
+        return response()->json([
+            'message' => 'Fiche client créée avec casier ' . $lockerCode . $suffix,
+            'client' => new ProfileResource($profile),
+        ], 201);
     }
 
-    public function update(Request $request, CrmClient $client): JsonResponse
+    public function update(Request $request, Profile $client): JsonResponse
     {
         $this->authorizeAgency($request->user(), $client);
 
@@ -237,87 +250,79 @@ class ClientController extends Controller
             'email' => $this->normalizeOptionalEmail($request->input('email')),
         ]);
 
-        $emailRules = $client->user_id
-            ? ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($client->user_id)]
-            : ['nullable', 'email', 'max:255', Rule::unique('users', 'email')];
+        $portalUser = $client->user;
+
+        $emailRules = $portalUser
+            ? ['required', 'email', 'max:255', Rule::unique('profiles', 'email')->ignore($client->id)]
+            : ['nullable', 'email', 'max:255', Rule::unique('profiles', 'email')->ignore($client->id)];
 
         $data = $request->validate([
             'first_name' => ['required', 'string', 'max:120'],
             'last_name' => ['required', 'string', 'max:120'],
             'email' => $emailRules,
-            'phone' => ['required', 'string', 'max:32'],
-            'phone_mobile' => ['nullable', 'string', 'max:32'],
+            'phone' => ['required', 'string', 'max:64'],
+            'phone_secondary' => ['nullable', 'string', 'max:64'],
             'agency_id' => ['nullable', 'exists:agencies,id'],
-            'billing_address' => ['nullable', 'string', 'max:500'],
-            'billing_postal_code' => ['nullable', 'string', 'max:16'],
-            'billing_country_id' => ['required', 'integer', 'exists:countries,id'],
-            'billing_state_id' => [
+            'address' => ['nullable', 'string', 'max:500'],
+            'landmark' => ['nullable', 'string', 'max:500'],
+            'zip_code' => ['nullable', 'string', 'max:16'],
+            'country_id' => ['required', 'integer', 'exists:countries,id'],
+            'state_id' => [
                 'required',
                 'integer',
-                Rule::exists('states', 'id')->where('country_id', $request->integer('billing_country_id')),
+                Rule::exists('states', 'id')->where('country_id', $request->integer('country_id')),
             ],
-            'billing_city_id' => [
+            'city_id' => [
                 'required',
                 'integer',
-                Rule::exists('cities', 'id')->where('state_id', $request->integer('billing_state_id')),
+                Rule::exists('cities', 'id')->where('state_id', $request->integer('state_id')),
             ],
         ]);
 
-        $client->update($data);
+        DB::transaction(function () use ($data, $client) {
+            $client->update($data);
 
-        if ($client->user_id) {
-            $u = User::find($client->user_id);
-            if ($u) {
-                $u->update([
+            if ($client->user) {
+                $client->user->update([
                     'name' => trim($data['first_name'] . ' ' . $data['last_name']),
                     'first_name' => $data['first_name'],
                     'last_name' => $data['last_name'],
                     'email' => $data['email'],
                     'phone' => $data['phone'],
-                    'phone_mobile' => $data['phone_mobile'] ?? null,
-                    'billing_address' => $data['billing_address'] ?? null,
-                    'billing_postal_code' => $data['billing_postal_code'] ?? null,
-                    'billing_country_id' => $data['billing_country_id'],
-                    'billing_state_id' => $data['billing_state_id'],
-                    'billing_city_id' => $data['billing_city_id'],
-                    'agency_id' => $data['agency_id'] ?? $u->agency_id,
+                    'phone_mobile' => $data['phone_secondary'] ?? null,
+                    'agency_id' => $data['agency_id'] ?? $client->user->agency_id,
                 ]);
             }
-        }
+        });
 
-        return response()->json(['message' => 'Client mis à jour.']);
+        return response()->json([
+            'message' => 'Client mis à jour.',
+            'client' => new ProfileResource($client->fresh(['user', 'city', 'state', 'country'])),
+        ]);
     }
 
-    public function toggleActive(Request $request, CrmClient $client): JsonResponse
+    public function toggleActive(Request $request, Profile $client): JsonResponse
     {
         $this->authorizeAgency($request->user(), $client);
 
         $nextActive = ! $client->is_active;
         $client->update(['is_active' => $nextActive]);
 
-        if ($client->user_id) {
-            $u = User::find($client->user_id);
-            if ($u) {
-                if ($nextActive) {
-                    $u->update(['email_verified_at' => now()]);
-                } else {
-                    $u->update(['email_verified_at' => null]);
-                }
-            }
+        if ($client->user) {
+            $client->user->update([
+                'email_verified_at' => $nextActive ? now() : null,
+            ]);
         }
 
         return response()->json(['message' => 'Statut du client modifié.']);
     }
 
-    /**
-     * Crée un compte portail pour une fiche sans utilisateur.
-     */
-    public function createPortal(Request $request, CrmClient $client): JsonResponse
+    public function createPortal(Request $request, Profile $client): JsonResponse
     {
         $this->authorizeAgency($request->user(), $client);
 
-        if ($client->user_id) {
-            return back()->withErrors(['portal' => 'Ce client a déjà un compte portail.']);
+        if ($client->user) {
+            return response()->json(['message' => 'Ce client a déjà un compte portail.'], 422);
         }
 
         $data = $request->validate([
@@ -325,35 +330,42 @@ class ClientController extends Controller
             'password' => ['required', Rules\Password::defaults()],
         ]);
 
-        $portalUser = User::create([
-            'name' => $client->display_name,
-            'first_name' => $client->first_name,
-            'last_name' => $client->last_name,
-            'email' => $data['email'],
-            'phone' => $client->phone,
-            'phone_mobile' => $client->phone_mobile,
-            'billing_address' => $client->billing_address,
-            'billing_postal_code' => $client->billing_postal_code,
-            'billing_country_id' => $client->billing_country_id,
-            'billing_state_id' => $client->billing_state_id,
-            'billing_city_id' => $client->billing_city_id,
-            'password' => Hash::make($data['password']),
-            'agency_id' => $client->agency_id,
-            'email_verified_at' => now(),
+        $portalUser = DB::transaction(function () use ($data, $client) {
+            if (! $client->email) {
+                $client->update(['email' => $data['email']]);
+            }
+
+            $newUser = User::create([
+                'profile_id' => $client->id,
+                'name' => $client->full_name,
+                'first_name' => $client->first_name,
+                'last_name' => $client->last_name,
+                'email' => $data['email'],
+                'phone' => $client->phone,
+                'phone_mobile' => $client->phone_secondary,
+                'password' => Hash::make($data['password']),
+                'agency_id' => $client->agency_id,
+                'email_verified_at' => now(),
+            ]);
+            $newUser->assignRole('client');
+
+            $locker = Locker::where('profile_id', $client->id)->first();
+            $locker?->update(['user_id' => $newUser->id]);
+
+            if ($locker) {
+                $newUser->update(['locker_number' => $locker->code]);
+            }
+
+            return $newUser;
+        });
+
+        return response()->json([
+            'message' => 'Compte portail créé pour ce client.',
+            'client' => new ProfileResource($client->fresh(['user'])),
         ]);
-        $portalUser->assignRole('client');
-
-        $client->update([
-            'user_id' => $portalUser->id,
-            'email' => $data['email'],
-        ]);
-
-        $client->locker?->update(['user_id' => $portalUser->id]);
-
-        return response()->json(['message' => 'Compte portail créé pour ce client.']);
     }
 
-    private function authorizeAgency(User $user, CrmClient $client): void
+    private function authorizeAgency(User $user, Profile $client): void
     {
         if (! $user->canAccessAllAgencies() && (int) $client->agency_id !== (int) $user->agency_id) {
             abort(403);
@@ -367,5 +379,25 @@ class ClientController extends Controller
         }
 
         return Agency::where('id', $user->agency_id)->get(['id', 'name']);
+    }
+
+    private function generateLockerNumber(): string
+    {
+        $prefix = Setting::getValue('locker_prefix', 'MRP');
+        $digits = (int) Setting::getValue('locker_digits', '4');
+        $mode = Setting::getValue('locker_mode', 'random');
+
+        if ($mode === 'sequential') {
+            $last = Locker::query()->orderByDesc('id')->value('code');
+            $lastNum = $last ? (int) preg_replace('/\D/', '', $last) : 0;
+
+            return $prefix . '-' . str_pad($lastNum + 1, $digits, '0', STR_PAD_LEFT);
+        }
+
+        do {
+            $code = $prefix . '-' . str_pad(random_int(0, pow(10, $digits) - 1), $digits, '0', STR_PAD_LEFT);
+        } while (Locker::where('code', $code)->exists());
+
+        return $code;
     }
 }

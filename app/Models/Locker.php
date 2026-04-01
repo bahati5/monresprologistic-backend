@@ -10,6 +10,7 @@ class Locker extends Model
 {
     protected $fillable = [
         'crm_client_id',
+        'profile_id',
         'user_id',
         'code',
         'formatted_address',
@@ -18,6 +19,11 @@ class Locker extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function profile(): BelongsTo
+    {
+        return $this->belongsTo(Profile::class);
     }
 
     public function crmClient(): BelongsTo

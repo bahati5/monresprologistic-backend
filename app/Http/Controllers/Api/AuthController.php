@@ -5,19 +5,20 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Resources\UserResource;
+use App\Models\Locker;
+use App\Models\Profile;
+use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    /**
-     * Handle SPA cookie-based login.
-     */
     public function login(LoginRequest $request): JsonResponse
     {
         $request->authenticate();
@@ -25,49 +26,92 @@ class AuthController extends Controller
         $request->session()->regenerate();
 
         return response()->json([
-            'user' => new UserResource($request->user()),
+            'user' => new UserResource($request->user()->load('profile')),
         ]);
     }
 
-    /**
-     * Register a new user.
-     */
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
+            'first_name' => ['required', 'string', 'max:120'],
+            'last_name' => ['required', 'string', 'max:120'],
+            'email' => ['required', 'string', 'email', 'max:255'],
+            'phone' => ['required', 'string', 'max:32'],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
         ]);
 
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-        ]);
+        $user = DB::transaction(function () use ($validated) {
+            $profile = Profile::query()
+                ->where('email', $validated['email'])
+                ->orWhere('phone', $validated['phone'])
+                ->first();
 
-        $user->assignRole('client');
+            if ($profile && $profile->user) {
+                throw ValidationException::withMessages([
+                    'email' => 'Un compte existe déjà avec cet email ou ce téléphone.',
+                ]);
+            }
+
+            if (! $profile) {
+                $profile = Profile::create([
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'email' => $validated['email'],
+                    'phone' => $validated['phone'],
+                    'is_active' => true,
+                ]);
+            } else {
+                $profile->update([
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'email' => $validated['email'],
+                    'phone' => $validated['phone'],
+                ]);
+            }
+
+            $lockerNumber = $this->generateLockerNumber();
+
+            $newUser = User::create([
+                'profile_id' => $profile->id,
+                'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'email' => $validated['email'],
+                'phone' => $validated['phone'],
+                'password' => Hash::make($validated['password']),
+                'locker_number' => $lockerNumber,
+            ]);
+
+            $newUser->assignRole('client');
+
+            $prefix = Setting::getValue('locker_prefix', 'MRP');
+            $template = Setting::getValue('locker_address_template', '');
+            $formatted = str_replace('{{locker_code}}', $lockerNumber, $template);
+
+            Locker::create([
+                'profile_id' => $profile->id,
+                'user_id' => $newUser->id,
+                'code' => $lockerNumber,
+                'formatted_address' => $formatted,
+            ]);
+
+            return $newUser;
+        });
 
         Auth::login($user);
 
         return response()->json([
-            'user' => new UserResource($user),
+            'user' => new UserResource($user->load('profile')),
         ], 201);
     }
 
-    /**
-     * Get the authenticated user.
-     */
     public function user(Request $request): JsonResponse
     {
         return response()->json([
-            'user' => new UserResource($request->user()),
+            'user' => new UserResource($request->user()->load('profile')),
         ]);
     }
 
-    /**
-     * Logout (invalidate session).
-     */
     public function logout(Request $request): JsonResponse
     {
         Auth::guard('web')->logout();
@@ -78,9 +122,6 @@ class AuthController extends Controller
         return response()->json(['message' => 'Logged out']);
     }
 
-    /**
-     * Create a Bearer token (for mobile / external API).
-     */
     public function createToken(Request $request): JsonResponse
     {
         $request->validate([
@@ -96,7 +137,27 @@ class AuthController extends Controller
 
         return response()->json([
             'token' => $token,
-            'user' => new UserResource($user),
+            'user' => new UserResource($user->load('profile')),
         ]);
+    }
+
+    private function generateLockerNumber(): string
+    {
+        $prefix = Setting::getValue('locker_prefix', 'MRP');
+        $digits = (int) Setting::getValue('locker_digits', '4');
+        $mode = Setting::getValue('locker_mode', 'random');
+
+        if ($mode === 'sequential') {
+            $last = Locker::query()->orderByDesc('id')->value('code');
+            $lastNum = $last ? (int) preg_replace('/\D/', '', $last) : 0;
+
+            return $prefix . '-' . str_pad($lastNum + 1, $digits, '0', STR_PAD_LEFT);
+        }
+
+        do {
+            $code = $prefix . '-' . str_pad(random_int(0, pow(10, $digits) - 1), $digits, '0', STR_PAD_LEFT);
+        } while (Locker::where('code', $code)->exists());
+
+        return $code;
     }
 }

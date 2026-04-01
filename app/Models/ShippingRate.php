@@ -28,6 +28,12 @@ class ShippingRate extends Model
         return $this->belongsTo(Agency::class);
     }
 
+    /** @return BelongsToMany<Agency, ShippingRate> */
+    public function agencies(): BelongsToMany
+    {
+        return $this->belongsToMany(Agency::class, 'shipping_rate_agency')->withTimestamps();
+    }
+
     public function originCountry(): BelongsTo
     {
         return $this->belongsTo(Country::class, 'origin_country_id');
