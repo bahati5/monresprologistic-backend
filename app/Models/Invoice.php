@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Invoice extends Model
 {
     protected $fillable = [
-        'invoice_number', 'user_id', 'shipment_id', 'amount', 'currency',
+        'invoice_number', 'user_id', 'shipment_id', 'amount', 'base_amount', 'currency',
         'status', 'due_at', 'paid_at',
     ];
 
@@ -18,6 +18,7 @@ class Invoice extends Model
         return [
             'due_at' => 'datetime',
             'paid_at' => 'datetime',
+            'base_amount' => 'decimal:2',
         ];
     }
 
@@ -34,5 +35,10 @@ class Invoice extends Model
     public function paymentProofs(): HasMany
     {
         return $this->hasMany(PaymentProof::class);
+    }
+
+    public function extraLines(): HasMany
+    {
+        return $this->hasMany(InvoiceExtraLine::class)->orderBy('sort_order');
     }
 }

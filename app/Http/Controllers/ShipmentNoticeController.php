@@ -2,14 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ShipmentStatus;
 use App\Models\CustomerPackage;
 use App\Models\Notification;
 use App\Models\PreAlert;
 use App\Models\PreAlertIssueReport;
-use App\Models\Status;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class ShipmentNoticeController extends Controller
 {
@@ -19,7 +20,7 @@ class ShipmentNoticeController extends Controller
         $isClient = $user->hasRole('client');
 
         $q = PreAlert::query()
-            ->with(['user', 'locker', 'status', 'media'])
+            ->with(['user', 'locker', 'media'])
             ->select('pre_alerts.*');
 
         if ($isClient) {
@@ -40,7 +41,7 @@ class ShipmentNoticeController extends Controller
         }
 
         if ($request->filled('status')) {
-            $q->where('pre_alerts.status_id', (int) $request->input('status'));
+            $q->where('pre_alerts.status', $request->string('status'));
         }
 
         $showCompleted = ! $isClient && $request->boolean('show_completed');
@@ -51,8 +52,7 @@ class ShipmentNoticeController extends Controller
         if ($isClient) {
             $q->latest('pre_alerts.created_at');
         } else {
-            $q->leftJoin('statuses', 'statuses.id', '=', 'pre_alerts.status_id')
-                ->orderByRaw("CASE WHEN statuses.code = 'received_hub' THEN 1 ELSE 0 END")
+            $q->orderByRaw('CASE WHEN pre_alerts.status = ? THEN 1 ELSE 0 END', [ShipmentStatus::ReceivedAtHub->value])
                 ->orderByRaw('pre_alerts.estimated_arrival_date IS NULL, pre_alerts.estimated_arrival_date ASC')
                 ->orderByDesc('pre_alerts.created_at');
         }
@@ -66,7 +66,11 @@ class ShipmentNoticeController extends Controller
         }
 
         if ($isClient) {
-            $payload['statuses'] = Status::query()->where('is_active', true)->orderBy('sort_order')->get();
+            $payload['statuses'] = collect(ShipmentStatus::cases())->values()->map(fn (ShipmentStatus $s, int $i) => [
+                'id' => $i + 1,
+                'code' => $s->value,
+                'name' => $s->label(),
+            ]);
         }
 
         return response()->json($payload);
@@ -80,13 +84,13 @@ class ShipmentNoticeController extends Controller
         return response()->json([
             'locker' => $isClient ? $user->locker : null,
             'clients' => $isClient ? null : User::query()
-                ->whereHas('roles', fn($q) => $q->where('name', 'client'))
-                ->when(!$user->canAccessAllAgencies(), fn($q) => $q->where('agency_id', $user->agency_id))
+                ->whereHas('roles', fn ($q) => $q->where('name', 'client'))
+                ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
                 ->select('id', 'name', 'email', 'locker_id')
                 ->with('locker:id,code')
                 ->orderBy('name')
                 ->get(),
-            'isAdmin' => !$isClient,
+            'isAdmin' => ! $isClient,
         ]);
     }
 
@@ -98,8 +102,8 @@ class ShipmentNoticeController extends Controller
         $data = $request->validate([
             'client_id' => [$isClient ? 'nullable' : 'required', 'integer', 'exists:users,id'],
             'merchant_name' => ['nullable', 'string', 'max:255'],
-            'vendor_tracking_number' => ['nullable', 'string', 'max:255'],
-            'carrier_name' => ['nullable', 'string', 'max:255'],
+            'vendor_tracking_number' => ['required', 'string', 'max:255'],
+            'carrier_name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:500'],
             'declared_value' => ['nullable', 'numeric', 'min:0'],
             'value_currency' => ['nullable', 'string', 'max:8'],
@@ -107,8 +111,6 @@ class ShipmentNoticeController extends Controller
             'estimated_arrival_date' => ['nullable', 'date'],
             'notes' => ['nullable', 'string', 'max:2000'],
         ]);
-
-        $status = Status::query()->where('code', 'pre_alerted')->first();
 
         // Admin can create for any client, client creates for themselves
         $targetUserId = $isClient ? $user->id : $data['client_id'];
@@ -119,7 +121,7 @@ class ShipmentNoticeController extends Controller
             'reference_code' => PreAlert::generateReferenceCode(),
             'user_id' => $targetUserId,
             'locker_id' => $targetUser?->locker?->id,
-            'status_id' => $status?->id,
+            'status' => ShipmentStatus::PendingDropOff,
         ]);
 
         foreach ($request->allFiles() as $key => $uploads) {
@@ -131,13 +133,17 @@ class ShipmentNoticeController extends Controller
             }
         }
 
-        return redirect()->route('shipment-notices.index')
-            ->with('success', 'Avis d\'expédition créé.');
+        $preAlert->load(['user', 'locker', 'media']);
+
+        return response()->json([
+            'message' => 'Colis attendu enregistré.',
+            'notice' => $preAlert,
+        ], 201);
     }
 
     public function show(Request $request, PreAlert $shipmentNotice): JsonResponse
     {
-        $shipmentNotice->load(['user', 'locker', 'status', 'media', 'customerPackage']);
+        $shipmentNotice->load(['user', 'locker', 'media', 'customerPackage']);
 
         return response()->json([
             'notice' => $shipmentNotice,
@@ -151,7 +157,7 @@ class ShipmentNoticeController extends Controller
         $user = $request->user();
         $isClient = $user->hasRole('client');
 
-        $shipmentNotice->load(['locker', 'status', 'media']);
+        $shipmentNotice->load(['locker', 'media']);
 
         return response()->json([
             'notice' => $shipmentNotice,
@@ -219,20 +225,13 @@ class ShipmentNoticeController extends Controller
             'condition_notes' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $receivedStatus = Status::query()->where('code', 'received_hub')->first();
-        $pendingPaymentStatus = Status::query()->where('code', 'pending_payment')->first();
-
-        // When a package is received at hub, it starts as "received_hub" 
-        // then moves to "pending_payment" for the customer to pay
-        $initialStatus = $pendingPaymentStatus?->id ?? $receivedStatus?->id;
-
         $pkg = CustomerPackage::query()->create([
             'reference_code' => CustomerPackage::generateReferenceCode(),
             'user_id' => $shipmentNotice->user_id,
             'agency_id' => $request->user()->agency_id,
             'locker_id' => $shipmentNotice->locker_id,
             'pre_alert_id' => $shipmentNotice->id,
-            'status_id' => $receivedStatus?->id,
+            'status' => ShipmentStatus::ReceivedAtHub,
             'description' => $shipmentNotice->description,
             'merchant_name' => $shipmentNotice->merchant_name,
             'weight_kg' => $data['weight_kg'],
@@ -247,7 +246,7 @@ class ShipmentNoticeController extends Controller
         ]);
 
         $shipmentNotice->update([
-            'status_id' => $receivedStatus?->id,
+            'status' => ShipmentStatus::ReceivedAtHub,
             'converted_customer_package_id' => $pkg->id,
         ]);
 
@@ -283,7 +282,7 @@ class ShipmentNoticeController extends Controller
                     'type' => 'inbound_issue',
                     'channel' => 'system',
                     'title' => 'Signalement — '.$shipmentNotice->reference_code,
-                    'body' => \Illuminate\Support\Str::limit($data['message'], 240),
+                    'body' => Str::limit($data['message'], 240),
                     'data' => [
                         'pre_alert_id' => $shipmentNotice->id,
                         'report_id' => $report->id,
@@ -322,9 +321,8 @@ class ShipmentNoticeController extends Controller
 
         abort_unless($user->hasRole('client') && $notice->user_id === $user->id, 403);
 
-        $notice->loadMissing('status');
         abort_if(
-            $notice->status?->code === 'received_hub',
+            ($notice->status ?? null) === ShipmentStatus::ReceivedAtHub,
             403,
             'Cet avis est déjà réceptionné et ne peut plus être modifié.'
         );

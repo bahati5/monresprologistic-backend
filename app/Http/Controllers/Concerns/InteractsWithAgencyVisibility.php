@@ -2,22 +2,20 @@
 
 namespace App\Http\Controllers\Concerns;
 
-use App\Models\CrmClient;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 
 trait InteractsWithAgencyVisibility
 {
-    protected function scopeShipmentsFor(Builder $query, User $user): Builder
+    protected function scopeShipmentsForUser(Builder $query, User $user): Builder
     {
         if ($user->hasRole('client')) {
-            $crmId = CrmClient::query()->where('user_id', $user->id)->value('id');
+            $profileId = $user->profile_id;
 
-            return $query->where(function (Builder $q) use ($user, $crmId) {
-                $q->where('sender_id', $user->id)
-                    ->orWhere('recipient_id', $user->id);
-                if ($crmId) {
-                    $q->orWhere('sender_client_id', $crmId);
+            return $query->where(function (Builder $q) use ($profileId, $user) {
+                $q->where('creator_user_id', $user->id);
+                if ($profileId) {
+                    $q->orWhere('sender_profile_id', $profileId);
                 }
             });
         }

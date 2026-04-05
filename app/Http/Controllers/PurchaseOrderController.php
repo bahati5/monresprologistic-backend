@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ShipmentStatus;
 use App\Models\CustomerPackage;
 use App\Models\PurchaseOrder;
-use App\Models\PurchaseOrderItem;
-use App\Models\Status;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 class PurchaseOrderController extends Controller
 {
@@ -17,7 +17,7 @@ class PurchaseOrderController extends Controller
         $user = $request->user();
         $isClient = $user->hasRole('client');
 
-        $q = PurchaseOrder::query()->with(['user', 'operator', 'status', 'items']);
+        $q = PurchaseOrder::query()->with(['user', 'operator', 'items']);
 
         if ($isClient) {
             $q->where('user_id', $user->id);
@@ -38,7 +38,7 @@ class PurchaseOrderController extends Controller
         }
 
         if ($request->filled('status')) {
-            $q->where('purchase_orders.status_id', (int) $request->input('status'));
+            $q->where('purchase_orders.status', $request->string('status'));
         }
 
         if ($request->filled('date_from')) {
@@ -58,7 +58,7 @@ class PurchaseOrderController extends Controller
 
         return response()->json([
             'orders' => $q->paginate(20)->withQueryString(),
-            'statuses' => Status::query()->where('is_active', true)->orderBy('sort_order')->get(),
+            'statuses' => $this->purchaseOrderStatusOptions(),
         ]);
     }
 
@@ -69,12 +69,12 @@ class PurchaseOrderController extends Controller
 
         return response()->json([
             'clients' => $isClient ? null : User::query()
-                ->whereHas('roles', fn($q) => $q->where('name', 'client'))
-                ->when(!$user->canAccessAllAgencies(), fn($q) => $q->where('agency_id', $user->agency_id))
+                ->whereHas('roles', fn ($q) => $q->where('name', 'client'))
+                ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
                 ->select('id', 'name', 'email')
                 ->orderBy('name')
                 ->get(),
-            'isAdmin' => !$isClient,
+            'isAdmin' => ! $isClient,
         ]);
     }
 
@@ -97,15 +97,13 @@ class PurchaseOrderController extends Controller
             'items.*.price_currency' => ['nullable', 'string', 'max:8'],
         ]);
 
-        $status = Status::query()->where('code', 'created')->first();
-
         // Admin can create for any client, client creates for themselves
         $targetUserId = $isClient ? $user->id : $data['client_id'];
 
         $po = PurchaseOrder::query()->create([
             'reference_code' => PurchaseOrder::generateReferenceCode(),
             'user_id' => $targetUserId,
-            'status_id' => $status?->id,
+            'status' => 'draft',
             'cart_url' => $data['cart_url'] ?? null,
             'notes' => $data['notes'] ?? null,
         ]);
@@ -138,7 +136,7 @@ class PurchaseOrderController extends Controller
 
     public function show(PurchaseOrder $purchaseOrder): JsonResponse
     {
-        $purchaseOrder->load(['user', 'operator', 'status', 'items', 'customerPackage']);
+        $purchaseOrder->load(['user', 'operator', 'items', 'customerPackage']);
 
         return response()->json([
             'order' => $purchaseOrder,
@@ -202,14 +200,12 @@ class PurchaseOrderController extends Controller
             + ($data['commission_amount'] ?? 0)
             + ($data['local_shipping_fee'] ?? 0);
 
-        $quotedStatus = Status::query()->where('code', 'quoted')->first();
-
         $purchaseOrder->update([
             ...$data,
             'total_amount' => $total,
             'operator_id' => $request->user()->id,
             'quoted_at' => now(),
-            'status_id' => $quotedStatus?->id ?? $purchaseOrder->status_id,
+            'status' => 'quoted',
         ]);
 
         return response()->json(['message' => 'Devis envoyé au client.']);
@@ -219,11 +215,9 @@ class PurchaseOrderController extends Controller
     {
         $this->authorizeStaff($request);
 
-        $paidStatus = Status::query()->where('code', 'paid')->first();
-
         $purchaseOrder->update([
             'paid_at' => now(),
-            'status_id' => $paidStatus?->id ?? $purchaseOrder->status_id,
+            'status' => 'paid',
         ]);
 
         return response()->json(['message' => 'Paiement enregistré.']);
@@ -233,11 +227,9 @@ class PurchaseOrderController extends Controller
     {
         $this->authorizeStaff($request);
 
-        $purchasingStatus = Status::query()->where('code', 'purchasing')->first();
-
         $purchaseOrder->update([
             'purchased_at' => now(),
-            'status_id' => $purchasingStatus?->id ?? $purchaseOrder->status_id,
+            'status' => 'purchasing',
         ]);
 
         return back()->with('success', 'Achat en cours d\'exécution.');
@@ -257,14 +249,12 @@ class PurchaseOrderController extends Controller
             'condition_notes' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $receivedStatus = Status::query()->where('code', 'received_hub')->first();
-
         $pkg = CustomerPackage::query()->create([
             'reference_code' => CustomerPackage::generateReferenceCode(),
             'user_id' => $purchaseOrder->user_id,
             'agency_id' => $request->user()->agency_id,
             'locker_id' => $purchaseOrder->user?->locker?->id,
-            'status_id' => $receivedStatus?->id,
+            'status' => ShipmentStatus::ReceivedAtHub,
             'description' => $purchaseOrder->items->pluck('description')->filter()->implode(', '),
             'weight_kg' => $data['weight_kg'],
             'length_cm' => $data['length_cm'] ?? null,
@@ -280,7 +270,7 @@ class PurchaseOrderController extends Controller
         $purchaseOrder->update([
             'received_at' => now(),
             'converted_customer_package_id' => $pkg->id,
-            'status_id' => $receivedStatus?->id,
+            'status' => 'received',
         ]);
 
         return back()->with('success', 'Converti en colis — '.$pkg->reference_code);
@@ -293,5 +283,20 @@ class PurchaseOrderController extends Controller
                 || $request->user()->hasAnyRole(['super_admin', 'agency_admin', 'operator']),
             403
         );
+    }
+
+    /**
+     * @return Collection<int, array{code: string, name: string}>
+     */
+    private function purchaseOrderStatusOptions(): Collection
+    {
+        return collect([
+            ['code' => 'draft', 'name' => 'Brouillon'],
+            ['code' => 'quoted', 'name' => 'Devis envoyé'],
+            ['code' => 'paid', 'name' => 'Payé'],
+            ['code' => 'purchasing', 'name' => 'Achat en cours'],
+            ['code' => 'received', 'name' => 'Réceptionné'],
+            ['code' => 'cancelled', 'name' => 'Annulé'],
+        ]);
     }
 }

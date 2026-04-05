@@ -2,31 +2,35 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ShipmentStatus;
+use App\Models\AddressBook;
+use App\Models\Agency;
 use App\Models\ArticleCategory;
 use App\Models\Country;
-use App\Models\DeliveryTime;
-use App\Models\Office;
 use App\Models\PackagingType;
-use App\Models\Recipient;
-use App\Models\ServiceType;
-use App\Models\Shipment;
-use App\Models\ShipmentItem;
-use App\Models\ShippingMode;
+use App\Models\Profile;
+use App\Models\Setting;
 use App\Models\ShipLine;
 use App\Models\ShipLineRate;
-use App\Models\Status;
+use App\Models\Shipment;
+use App\Models\ShipmentItem;
+use App\Models\ShipmentLog;
+use App\Models\ShipmentPayment;
+use App\Models\ShippingMode;
 use App\Models\TransportCompany;
 use App\Models\User;
 use App\Services\PricingEngine;
-use App\Services\ShippingRateResolver;
 use App\Services\ShipmentWorkflowService;
+use App\Support\ShipmentDocumentSettings;
+use App\Support\ShipmentInvoiceNumberGenerator;
+use App\Support\ShipmentRowPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ShipmentController extends Controller
@@ -38,48 +42,52 @@ class ShipmentController extends Controller
         $user = $request->user();
         $sort = (string) $request->input('sort', 'created_desc');
         $q = Shipment::query()->with([
-            'status',
-            'sender',
-            'recipient',
-            'senderClient',
-            'deliveryRecipient',
+            'senderProfile',
+            'senderProfile.country',
+            'senderProfile.city',
+            'senderProfile.state',
+            'recipientProfile',
+            'recipientProfile.country',
+            'recipientProfile.city',
+            'recipientProfile.state',
             'agency',
-            'serviceType',
+            'originCountry',
+            'destCountry',
             'assignedDriver',
+            'regroupement',
         ]);
         if ($sort === 'created_asc') {
             $q->orderBy('created_at');
         } else {
             $q->orderByDesc('created_at');
         }
-        $this->scopeShipmentsFor($q, $user);
+        $this->scopeShipmentsForUser($q, $user);
 
         if ($request->filled('search')) {
             $term = '%'.$request->string('search').'%';
             $q->where(function ($w) use ($term) {
                 $w->where('public_tracking', 'like', $term)
-                    ->orWhereHas('sender', fn ($u) => $u->where('name', 'like', $term))
-                    ->orWhereHas('recipient', fn ($u) => $u->where('name', 'like', $term));
+                    ->orWhereHas('senderProfile', fn ($p) => $p->whereRaw("CONCAT(first_name, ' ', last_name) like ?", [$term]))
+                    ->orWhereHas('recipientProfile', fn ($p) => $p->whereRaw("CONCAT(first_name, ' ', last_name) like ?", [$term]));
             });
         }
 
-        if ($request->filled('status_id')) {
-            $q->where('status_id', (int) $request->input('status_id'));
+        if ($request->filled('status')) {
+            $q->where('status', $request->string('status'));
         }
 
         if (! $user->hasRole('client')) {
             $tab = (string) $request->input('status_tab', 'all');
             if ($tab !== 'all') {
                 $map = [
-                    'preparation' => ['created', 'accepted', 'in_preparation'],
-                    'transit' => ['collected', 'in_transit'],
-                    'customs' => ['in_customs'],
-                    'delivered' => ['arrived', 'out_for_delivery', 'delivered'],
+                    'preparation' => ['draft', 'pending_drop_off', 'received_at_hub'],
+                    'transit' => ['ready_for_dispatch', 'in_transit'],
+                    'customs' => ['in_transit'],
+                    'delivered' => ['arrived_at_destination', 'delivered'],
                 ];
                 $codes = $map[$tab] ?? null;
                 if ($codes !== null) {
-                    $ids = Status::query()->whereIn('code', $codes)->pluck('id');
-                    $q->whereIn('status_id', $ids);
+                    $q->whereIn('status', $codes);
                 }
             }
         }
@@ -91,14 +99,28 @@ class ShipmentController extends Controller
         $sheetShipment = null;
         if (! $user->hasRole('client') && $request->filled('sheet')) {
             $sheet = Shipment::query()
-                ->with(['status', 'sender', 'recipient', 'items', 'logs.user', 'agency', 'assignedDriver', 'serviceType'])
+                ->with([
+                    'senderProfile',
+                    'senderProfile.country',
+                    'senderProfile.city',
+                    'senderProfile.state',
+                    'recipientProfile',
+                    'recipientProfile.country',
+                    'recipientProfile.city',
+                    'recipientProfile.state',
+                    'items',
+                    'logs.user',
+                    'agency',
+                    'originCountry',
+                    'destCountry',
+                    'assignedDriver',
+                ])
                 ->whereKey((int) $request->input('sheet'))
                 ->first();
             if ($sheet && $user->can('view', $sheet)) {
                 $workflow = app(ShipmentWorkflowService::class);
-                $officesById = $this->prefetchOfficesForShipment($sheet);
                 $sheetShipment = [
-                    'shipment' => $this->buildShipmentListRow($sheet, $officesById, null),
+                    'shipment' => $this->buildShipmentListRow($sheet),
                     'workflow_steps' => $workflow->buildStepsForShipment($sheet),
                     'available_transitions' => $workflow->getAvailableTransitions($sheet)->values()->all(),
                 ];
@@ -111,18 +133,8 @@ class ShipmentController extends Controller
         $perPage = max(1, min($perPage, 100));
         $paginator = $q->paginate($perPage)->withQueryString();
         $items = collect($paginator->items());
-        $officeIds = $items
-            ->map(fn (Shipment $s) => (int) (($s->service_options ?? [])['office_id'] ?? 0))
-            ->filter(fn (int $id) => $id > 0)
-            ->unique()
-            ->values();
-        $officesById = $officeIds->isEmpty()
-            ? collect()
-            : Office::query()->whereIn('id', $officeIds)->get()->keyBy('id');
-        $recipientMatchMap = $this->bulkResolveRecipientsForShipments($items);
-
         $paginator->setCollection(
-            $items->map(fn (Shipment $s) => $this->buildShipmentListRow($s, $officesById, $recipientMatchMap))
+            $items->map(fn (Shipment $s) => $this->buildShipmentListRow($s))
         );
 
         return response()->json([
@@ -148,17 +160,15 @@ class ShipmentController extends Controller
         return response()->streamDownload(function () use ($query) {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, ['Suivi', 'Expéditeur', 'Destinataire', 'Statut', 'Agence', 'Poids (kg)', 'Prix', 'Date'], ';');
-            $query->with(['status', 'sender', 'recipient', 'agency'])->chunk(200, function ($shipments) use ($handle) {
+            $query->with(['senderProfile', 'recipientProfile', 'agency'])->chunk(200, function ($shipments) use ($handle) {
                 foreach ($shipments as $s) {
-                    $statusName = $s->status?->name;
-                    if (is_array($statusName)) {
-                        $statusName = $statusName['fr'] ?? $statusName['en'] ?? reset($statusName) ?? $s->status?->code ?? '';
-                    }
+                    $st = $s->status;
+                    $statusName = $st instanceof ShipmentStatus ? $st->label() : '';
                     fputcsv($handle, [
                         $s->public_tracking ?? '#'.$s->id,
-                        $s->sender?->name ?? '',
-                        $s->recipient?->name ?? '',
-                        $statusName ?? '',
+                        $s->senderProfile?->full_name ?? '',
+                        $s->recipientProfile?->full_name ?? '',
+                        $statusName,
                         $s->agency?->name ?? '',
                         $s->weight_kg ?? '',
                         $s->calculated_price ?? '',
@@ -194,18 +204,17 @@ class ShipmentController extends Controller
         }
 
         $agencies = $user->canAccessAllAgencies()
-            ? \App\Models\Agency::where('is_active', true)->get(['id', 'name', 'code'])
-            : \App\Models\Agency::where('id', $user->agency_id)->get(['id', 'name', 'code']);
+            ? Agency::where('is_active', true)->get(['id', 'name', 'code'])
+            : Agency::where('id', $user->agency_id)->get(['id', 'name', 'code']);
 
         $drivers = $this->getDriversForUser($user);
 
-        $trackingPrefix = \App\Models\Setting::getValue('tracking_prefix', 'MRP');
-        $trackingNumberDigits = max(4, min(32, (int) (\App\Models\Setting::getValue('tracking_number_length', '8') ?: 8)));
-        $volumetricDivisor = max(1.0, (float) (\App\Models\Setting::getValue('volumetric_divisor', '5000') ?: 5000));
+        $trackingPrefix = Setting::getValue('tracking_prefix', 'MRP');
+        $trackingNumberDigits = max(4, min(32, (int) (Setting::getValue('tracking_number_length', '8') ?: 8)));
+        $volumetricDivisor = max(1.0, (float) (Setting::getValue('volumetric_divisor', '5000') ?: 5000));
 
         return response()->json([
             'users' => $usersQuery->get(['id', 'name', 'email']),
-            'serviceTypes' => ServiceType::query()->where('is_active', true)->get(),
             'shippingModes' => ShippingMode::query()
                 ->where('is_active', true)
                 ->with(['deliveryTimes' => fn ($q) => $q->where('is_active', true)->select(['id', 'label', 'shipping_mode_id'])])
@@ -216,14 +225,8 @@ class ShipmentController extends Controller
                 ->orderBy('sort_order')
                 ->get(['id', 'name', 'is_billable', 'unit_price']),
             'transportCompanies' => TransportCompany::query()->where('is_active', true)->orderBy('name')->get(['id', 'name']),
-            'offices' => Office::query()->where('is_active', true)
-                ->where(function ($q) use ($user) {
-                    $q->where('agency_id', $user->agency_id)->orWhereNull('agency_id');
-                })
-                ->orderBy('name')->get(['id', 'name', 'type']),
             'shipLines' => ShipLine::query()->where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'countries' => Country::query()
-                ->where('is_active', true)
                 ->orderBy('name')
                 ->limit(500)
                 ->get(['id', 'name', 'code', 'iso2', 'emoji']),
@@ -234,9 +237,9 @@ class ShipmentController extends Controller
             'trackingNumberDigits' => $trackingNumberDigits,
             'volumetricDivisor' => $volumetricDivisor,
             'defaultAgencyId' => $user->agency_id,
-            'defaultInsurancePct' => (string) (\App\Models\Setting::getValue('default_insurance_pct', '0') ?? '0'),
-            'defaultCustomsDutyPct' => (string) (\App\Models\Setting::getValue('default_customs_duty_pct', '0') ?? '0'),
-            'defaultTaxPct' => (string) (\App\Models\Setting::getValue('default_tax_pct', '0') ?? '0'),
+            'defaultInsurancePct' => (string) (Setting::getValue('default_insurance_pct', '0') ?? '0'),
+            'defaultCustomsDutyPct' => (string) (Setting::getValue('default_customs_duty_pct', '0') ?? '0'),
+            'defaultTaxPct' => (string) (Setting::getValue('default_tax_pct', '0') ?? '0'),
         ]);
     }
 
@@ -245,26 +248,11 @@ class ShipmentController extends Controller
         $this->authorize('create', Shipment::class);
 
         $data = $request->validate([
-            'sender_client_id' => ['required', 'exists:crm_clients,id'],
-            'recipient_id' => ['required', 'exists:recipients,id'],
+            'sender_profile_id' => ['required', 'exists:profiles,id'],
+            'recipient_profile_id' => ['required', 'exists:profiles,id'],
             'agency_id' => ['nullable', 'exists:agencies,id'],
-            'shipping_mode_id' => [
-                'nullable',
-                Rule::requiredIf(fn () => $request->filled('delivery_time_id')),
-                'exists:shipping_modes,id',
-            ],
-            'delivery_time_id' => [
-                'nullable',
-                'integer',
-                Rule::exists('delivery_times', 'id')->where(function ($q) use ($request) {
-                    $mid = $request->input('shipping_mode_id');
-                    if ($mid === null || $mid === '') {
-                        return;
-                    }
-                    $q->where('shipping_mode_id', (int) $mid);
-                }),
-            ],
-            'office_id' => ['nullable', 'exists:offices,id'],
+            'shipping_mode_id' => ['nullable', 'exists:shipping_modes,id'],
+            'delivery_time_label' => ['nullable', 'string', 'max:500'],
             'packaging_type_id' => ['nullable', 'exists:packaging_types,id'],
             'transport_company_id' => ['nullable', 'exists:transport_companies,id'],
             'ship_line_id' => ['nullable', 'exists:ship_lines,id'],
@@ -280,9 +268,11 @@ class ShipmentController extends Controller
             'items.*.height_cm' => ['nullable', 'numeric', 'min:0'],
             'items.*.value' => ['nullable', 'numeric', 'min:0'],
             'items.*.origin_country_id' => ['nullable', 'integer', 'exists:countries,id'],
+            'items.*.delivery_time_label' => ['nullable', 'string', 'max:500'],
             'manual_fee' => ['nullable', 'numeric', 'min:0'],
             'service_options' => ['nullable', 'array'],
             'service_options.manual_fee_label' => ['nullable', 'string', 'max:255'],
+            'service_options.delivery_time_label' => ['nullable', 'string', 'max:500'],
             'declared_value' => ['nullable', 'numeric', 'min:0'],
             'declared_currency' => ['nullable', 'string', 'max:8'],
             'insurance_pct' => ['nullable', 'numeric', 'min:0', 'max:100'],
@@ -295,14 +285,11 @@ class ShipmentController extends Controller
         ]);
 
         $user = $request->user();
-        $agencyId = (int) ($data['agency_id'] ?? $user->agency_id);
-        if (! $user->canAccessAllAgencies()) {
-            $agencyId = (int) $user->agency_id;
-        }
+        $agencyId = $this->resolveWizardAgencyId($data, $user);
         $payload = array_merge($data, ['agency_id' => $agencyId]);
         $pricing = $this->computeWizardPricing($payload, $user, $agencyId);
         $snap = $pricing['pricing_snapshot'];
-        $currencyCode = (string) (\App\Models\Setting::getValue('currency', 'EUR') ?: 'EUR');
+        $currencyCode = (string) (Setting::getValue('currency', 'EUR') ?: 'EUR');
 
         return response()->json([
             'base_quote' => $snap['base_quote'],
@@ -319,8 +306,8 @@ class ShipmentController extends Controller
         $this->authorize('create', Shipment::class);
 
         $data = $request->validate([
-            'sender_client_id' => ['required', 'exists:crm_clients,id'],
-            'recipient_id' => ['required', 'exists:recipients,id'],
+            'sender_profile_id' => ['required', 'exists:profiles,id'],
+            'recipient_profile_id' => ['required', 'exists:profiles,id'],
             'agency_id' => ['nullable', 'exists:agencies,id'],
             'assigned_driver_id' => ['nullable', 'exists:users,id'],
             'items' => ['required', 'array', 'min:1'],
@@ -332,23 +319,9 @@ class ShipmentController extends Controller
             'items.*.height_cm' => ['nullable', 'numeric', 'min:0'],
             'items.*.value' => ['nullable', 'numeric', 'min:0'],
             'items.*.origin_country_id' => ['nullable', 'integer', 'exists:countries,id'],
-            'shipping_mode_id' => [
-                'nullable',
-                Rule::requiredIf(fn () => $request->filled('delivery_time_id')),
-                'exists:shipping_modes,id',
-            ],
-            'delivery_time_id' => [
-                'nullable',
-                'integer',
-                Rule::exists('delivery_times', 'id')->where(function ($q) use ($request) {
-                    $mid = $request->input('shipping_mode_id');
-                    if ($mid === null || $mid === '') {
-                        return;
-                    }
-                    $q->where('shipping_mode_id', (int) $mid);
-                }),
-            ],
-            'office_id' => ['nullable', 'exists:offices,id'],
+            'items.*.delivery_time_label' => ['nullable', 'string', 'max:500'],
+            'shipping_mode_id' => ['nullable', 'exists:shipping_modes,id'],
+            'delivery_time_label' => ['nullable', 'string', 'max:500'],
             'packaging_type_id' => ['nullable', 'exists:packaging_types,id'],
             'transport_company_id' => ['nullable', 'exists:transport_companies,id'],
             'ship_line_id' => ['nullable', 'exists:ship_lines,id'],
@@ -357,6 +330,7 @@ class ShipmentController extends Controller
             'ship_line_rate_id' => ['nullable', 'integer', 'exists:ship_line_rates,id'],
             'service_options' => ['nullable', 'array'],
             'service_options.manual_fee_label' => ['nullable', 'string', 'max:255'],
+            'service_options.delivery_time_label' => ['nullable', 'string', 'max:500'],
             'manual_fee' => ['nullable', 'numeric', 'min:0'],
             'declared_value' => ['nullable', 'numeric', 'min:0'],
             'declared_currency' => ['nullable', 'string', 'max:8'],
@@ -371,27 +345,13 @@ class ShipmentController extends Controller
         ]);
 
         $user = $request->user();
-        $isStaffCreation = $user->hasAnyRole(['admin', 'super_admin', 'employee']);
-        $agencyId = (int) ($data['agency_id'] ?? $user->agency_id);
-        if (! $user->canAccessAllAgencies()) {
-            $agencyId = (int) $user->agency_id;
-        } elseif (! empty($data['agency_id'])) {
-            $ok = \App\Models\Agency::query()->where('is_active', true)->whereKey((int) $data['agency_id'])->exists();
-            if (! $ok) {
-                $agencyId = (int) $user->agency_id;
-            }
-        }
+        // Comptoir : tout rôle staff (hors client). Les anciens rôles admin/employee n'existent pas dans RolesAndPermissionsSeeder.
+        $isStaffCreation = ! $user->hasRole('client');
+        $agencyId = $this->resolveWizardAgencyId($data, $user);
 
-        // Staff (comptoir) → directement en préparation. Client (portail) → créée, à valider plus tard.
-        $defaultStatusCode = $isStaffCreation ? 'in_preparation' : 'created';
-        $defaultStatus = Status::query()->where('code', $defaultStatusCode)->first()
-            ?? Status::query()->where('code', 'created')->first();
-        $resolvedStatusId = $defaultStatus?->id;
-        if ($resolvedStatusId === null) {
-            $resolvedStatusId = Status::query()->where('is_active', true)->orderBy('sort_order')->value('id');
-        }
+        $initialStatus = $isStaffCreation ? ShipmentStatus::ReceivedAtHub : ShipmentStatus::Draft;
 
-        $shipment = DB::transaction(function () use ($data, $user, $resolvedStatusId, $agencyId, $isStaffCreation) {
+        $shipment = DB::transaction(function () use ($data, $user, $agencyId, $isStaffCreation, $initialStatus) {
             $pricing = $this->computeWizardPricing($data, $user, $agencyId);
             $serviceOptions = $pricing['service_options'];
             $pricingSnapshot = $pricing['pricing_snapshot'];
@@ -400,18 +360,26 @@ class ShipmentController extends Controller
             $volWeight = $pricing['vol_weight'];
             $declaredValue = $pricing['declared_value_effective'];
 
-            $crm = \App\Models\CrmClient::query()->findOrFail($data['sender_client_id']);
-            $recipientRecord = \App\Models\Recipient::findOrFail($data['recipient_id']);
+            $senderProfile = Profile::findOrFail($data['sender_profile_id']);
+            $recipientProfile = Profile::findOrFail($data['recipient_profile_id']);
 
-            if ($recipientRecord->crm_client_id !== $crm->id) {
-                if ((int) $recipientRecord->user_id !== (int) ($crm->user_id ?? 0)) {
+            // Check address book if sender has a linked user account
+            $senderUser = $senderProfile->user;
+            if ($senderUser) {
+                $inBook = AddressBook::query()
+                    ->where('owner_profile_id', $senderProfile->id)
+                    ->where('contact_profile_id', $recipientProfile->id)
+                    ->exists();
+                if (! $inBook) {
                     throw ValidationException::withMessages([
-                        'recipient_id' => 'Ce destinataire n’appartient pas à l’expéditeur sélectionné.',
+                        'recipient_profile_id' => 'Ce destinataire n\'appartient pas au carnet de l\'expéditeur.',
                     ]);
                 }
+            } elseif ((int) ($recipientProfile->agency_id ?? 0) !== (int) ($senderProfile->agency_id ?? 0)) {
+                throw ValidationException::withMessages([
+                    'recipient_profile_id' => 'Ce destinataire n\'appartient pas à l\'agence du client.',
+                ]);
             }
-
-            $senderUserId = $crm->user_id;
 
             $originC = isset($data['origin_country_id']) && $data['origin_country_id'] !== '' && $data['origin_country_id'] !== null
                 ? (int) $data['origin_country_id'] : null;
@@ -419,15 +387,13 @@ class ShipmentController extends Controller
                 ? (int) $data['dest_country_id'] : null;
 
             $shipment = Shipment::query()->create([
-                'sender_client_id' => $crm->id,
-                'sender_id' => $senderUserId,
-                'recipient_id' => $senderUserId,
-                'delivery_recipient_id' => $recipientRecord->id,
+                'sender_profile_id' => $senderProfile->id,
+                'recipient_profile_id' => $recipientProfile->id,
+                'creator_user_id' => $user->id,
                 'agency_id' => $agencyId,
                 'origin_country_id' => $originC && $originC > 0 ? $originC : null,
                 'dest_country_id' => $destC && $destC > 0 ? $destC : null,
-                'status_id' => $resolvedStatusId,
-                'service_type_id' => null,
+                'status' => $initialStatus,
                 'assigned_driver_id' => $data['assigned_driver_id'] ?? null,
                 'weight_kg' => $realWeight ?: null,
                 'volumetric_weight_kg' => $volWeight ?: null,
@@ -445,6 +411,7 @@ class ShipmentController extends Controller
                 if ($originCountryId === 0) {
                     $originCountryId = null;
                 }
+                $itemDt = isset($item['delivery_time_label']) ? trim((string) $item['delivery_time_label']) : '';
                 ShipmentItem::query()->create([
                     'shipment_id' => $shipment->id,
                     'description' => $item['description'],
@@ -455,13 +422,16 @@ class ShipmentController extends Controller
                     'height_cm' => $item['height_cm'] ?? null,
                     'value' => $item['value'] ?? null,
                     'origin_country_id' => $originCountryId,
+                    'delivery_time_label' => $itemDt !== '' ? $itemDt : null,
                 ]);
             }
 
+            ShipmentInvoiceNumberGenerator::assignToShipment($shipment);
+
             $shipment->logs()->create([
                 'user_id' => $user->id,
-                'status_id' => $resolvedStatusId,
-                'title' => $isStaffCreation ? 'Expédition créée (en préparation)' : 'Expédition créée',
+                'status' => $initialStatus,
+                'title' => $isStaffCreation ? 'Expédition enregistrée au hub' : 'Expédition créée (brouillon)',
                 'ip_address' => request()->ip(),
             ]);
 
@@ -479,13 +449,22 @@ class ShipmentController extends Controller
             'assigned_driver_id' => ['nullable', 'exists:users,id'],
         ]);
 
+        $driverId = $data['assigned_driver_id'] ?? null;
+        if ($driverId !== null && ! $this->shipmentStatusAllowsDriverAssignment($shipment->status)) {
+            throw ValidationException::withMessages([
+                'assigned_driver_id' => [
+                    'L’assignation de chauffeur n’est possible qu’en phase ramassage (en attente de dépôt) ou livraison (en transit ou arrivé à destination).',
+                ],
+            ]);
+        }
+
         $shipment->update([
-            'assigned_driver_id' => $data['assigned_driver_id'] ?? null,
+            'assigned_driver_id' => $driverId,
         ]);
 
         $shipment->logs()->create([
             'user_id' => $request->user()->id,
-            'status_id' => $shipment->status_id,
+            'status' => $shipment->status,
             'title' => 'Chauffeur assigné / modifié',
             'ip_address' => $request->ip(),
         ]);
@@ -498,29 +477,41 @@ class ShipmentController extends Controller
         $this->authorize('view', $shipment);
 
         $shipment->load([
-            'status',
-            'sender',
-            'senderClient',
-            'recipient',
-            'deliveryRecipient',
+            'senderProfile',
+            'senderProfile.country',
+            'senderProfile.city',
+            'senderProfile.state',
+            'recipientProfile',
+            'recipientProfile.country',
+            'recipientProfile.city',
+            'recipientProfile.state',
             'items.originCountry',
+            'agency',
+            'originCountry',
+            'destCountry',
+            'regroupement.shipments.senderProfile.country',
+            'regroupement.shipments.senderProfile.city',
+            'regroupement.shipments.recipientProfile.country',
+            'regroupement.shipments.recipientProfile.city',
+            'regroupement.shipments.originCountry',
+            'regroupement.shipments.destCountry',
             'logs.user',
             'currentHub',
-            'serviceType',
             'assignedDriver',
+            'creator',
             'preAlert.media',
+            'payments.recordedBy',
         ]);
         $workflow = app(ShipmentWorkflowService::class);
         $workflowSteps = $workflow->buildStepsForShipment($shipment);
         $availableTransitions = $workflow->getAvailableTransitions($shipment);
         $drivers = $this->getDriversForUser($request->user());
-        $officesById = $this->prefetchOfficesForShipment($shipment);
 
-        $doc = \App\Support\ShipmentDocumentSettings::merged();
+        $doc = ShipmentDocumentSettings::merged();
         $invoice = $shipment->invoices()->first();
 
         return response()->json([
-            'shipment' => $this->buildShipmentListRow($shipment, $officesById, null),
+            'shipment' => $this->buildShipmentListRow($shipment),
             'workflow_steps' => $workflowSteps,
             'available_transitions' => $availableTransitions,
             'drivers' => $drivers,
@@ -534,8 +525,8 @@ class ShipmentController extends Controller
                 'nit' => $doc['nit'] ?? '',
                 'currency' => $doc['currency'] ?? 'EUR',
                 'currency_symbol' => $doc['currency_symbol'] ?? '€',
-                'decimals' => (int) (\App\Models\Setting::getValue('decimals', '2') ?: 2),
-                'symbol_position' => (\App\Models\Setting::getValue('symbol_position', 'prefix') ?: 'prefix') === 'suffix' ? 'suffix' : 'prefix',
+                'decimals' => (int) (Setting::getValue('decimals', '2') ?: 2),
+                'symbol_position' => (Setting::getValue('symbol_position', 'prefix') ?: 'prefix') === 'suffix' ? 'suffix' : 'prefix',
                 'weight_unit' => $doc['weight_unit'] ?? 'kg',
                 'transport_company' => $doc['transport_company'] ?? '',
                 'shipping_mode_label' => $doc['shipping_mode_label'] ?? '',
@@ -551,19 +542,6 @@ class ShipmentController extends Controller
         ]);
     }
 
-    public function acceptance(Request $request, Shipment $shipment): JsonResponse
-    {
-        $this->authorize('view', $shipment);
-
-        $shipment->load(['status', 'sender', 'recipient', 'items', 'logs.user', 'currentHub', 'serviceType', 'assignedDriver']);
-        $drivers = $this->getDriversForUser($request->user());
-
-        return response()->json([
-            'shipment' => $shipment,
-            'drivers' => $drivers,
-        ]);
-    }
-
     public function accept(Request $request, Shipment $shipment): JsonResponse
     {
         $this->authorize('update', $shipment);
@@ -574,21 +552,16 @@ class ShipmentController extends Controller
             'notes' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $acceptedStatus = Status::query()->where('code', 'accepted')->first();
-        if (! $acceptedStatus) {
-            return back()->withErrors(['status' => 'Statut "acceptée" introuvable.']);
-        }
-
         $shipment->update(array_filter([
             'assigned_driver_id' => $data['assigned_driver_id'] ?? null,
             'calculated_price' => $data['calculated_price'] ?? $shipment->calculated_price,
-            'status_id' => $acceptedStatus->id,
+            'status' => ShipmentStatus::ReceivedAtHub,
         ]));
 
         $shipment->logs()->create([
             'user_id' => $request->user()->id,
-            'status_id' => $acceptedStatus->id,
-            'title' => 'Expédition acceptée',
+            'status' => ShipmentStatus::ReceivedAtHub,
+            'title' => 'Expédition réceptionnée / validée au hub',
             'description' => $data['notes'] ?? null,
             'ip_address' => $request->ip(),
         ]);
@@ -601,17 +574,24 @@ class ShipmentController extends Controller
         $this->authorize('update', $shipment);
 
         $data = $request->validate([
-            'status_id' => ['required', 'exists:statuses,id'],
+            'status' => ['required', 'string', Rule::enum(ShipmentStatus::class)],
             'notes' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $newStatus = Status::findOrFail($data['status_id']);
-        $shipment->update(['status_id' => $newStatus->id]);
+        $newStatus = ShipmentStatus::from($data['status']);
+        $current = $shipment->status ?? ShipmentStatus::Draft;
+        if (! $current->canTransitionTo($newStatus)) {
+            throw ValidationException::withMessages([
+                'status' => 'Transition de statut non autorisée.',
+            ]);
+        }
+
+        $shipment->update(['status' => $newStatus]);
 
         $shipment->logs()->create([
             'user_id' => $request->user()->id,
-            'status_id' => $newStatus->id,
-            'title' => 'Changement de statut : '.($newStatus->name['fr'] ?? $newStatus->code),
+            'status' => $newStatus,
+            'title' => 'Changement de statut : '.$newStatus->label(),
             'description' => $data['notes'] ?? null,
             'ip_address' => $request->ip(),
         ]);
@@ -628,20 +608,15 @@ class ShipmentController extends Controller
             'delivery_notes' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $deliveredStatus = Status::query()->where('code', 'delivered')->first();
-        if (! $deliveredStatus) {
-            return back()->withErrors(['status' => 'Statut "livrée" introuvable.']);
-        }
-
         $shipment->update([
-            'status_id' => $deliveredStatus->id,
+            'status' => ShipmentStatus::Delivered,
             'delivery_signature' => $data['delivery_signature'] ?? null,
             'delivery_notes' => $data['delivery_notes'] ?? null,
         ]);
 
         $shipment->logs()->create([
             'user_id' => $request->user()->id,
-            'status_id' => $deliveredStatus->id,
+            'status' => ShipmentStatus::Delivered,
             'title' => 'Livraison effectuée',
             'description' => $data['delivery_notes'] ?? null,
             'meta' => $data['delivery_signature'] ? ['has_signature' => true] : null,
@@ -657,7 +632,7 @@ class ShipmentController extends Controller
 
         $data = $request->validate([
             'amount' => ['required', 'numeric', 'min:0.01'],
-            'payment_method' => ['required', 'string', 'in:cash,mobile_money,bank_transfer,card,other'],
+            'payment_method' => ['required', 'string', 'max:255'],
             'reference' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string', 'max:2000'],
         ]);
@@ -674,12 +649,6 @@ class ShipmentController extends Controller
             $paidAt = now();
         }
 
-        $shipment->update([
-            'amount_paid' => $newTotal,
-            'payment_status' => $paymentStatus,
-            'paid_at' => $paidAt,
-        ]);
-
         $methodLabels = [
             'cash' => 'Espèces',
             'mobile_money' => 'Mobile Money',
@@ -688,15 +657,85 @@ class ShipmentController extends Controller
             'other' => 'Autre',
         ];
 
-        $shipment->logs()->create([
-            'user_id' => $request->user()->id,
-            'status_id' => $shipment->status_id,
-            'title' => 'Paiement enregistré : '.number_format($newAmount, 2).' '.($shipment->currency ?? 'USD').' ('.$methodLabels[$data['payment_method']].')',
-            'description' => $data['notes'] ?? null,
-            'ip_address' => $request->ip(),
-        ]);
+        $label = $methodLabels[$data['payment_method']] ?? $data['payment_method'];
+
+        DB::transaction(function () use ($request, $shipment, $data, $newTotal, $paymentStatus, $paidAt, $newAmount, $label) {
+            $shipment->update([
+                'amount_paid' => $newTotal,
+                'payment_status' => $paymentStatus,
+                'paid_at' => $paidAt,
+            ]);
+
+            ShipmentPayment::query()->create([
+                'shipment_id' => $shipment->id,
+                'amount' => $newAmount,
+                'payment_method' => $data['payment_method'],
+                'reference' => $data['reference'] ?? null,
+                'notes' => $data['notes'] ?? null,
+                'recorded_by_user_id' => $request->user()->id,
+            ]);
+
+            if ($paymentStatus === 'paid') {
+                $cur = $shipment->status ?? ShipmentStatus::Draft;
+                if (in_array($cur, [ShipmentStatus::Draft, ShipmentStatus::ReceivedAtHub], true)
+                    && $cur->canTransitionTo(ShipmentStatus::ReadyForDispatch)) {
+                    $shipment->update(['status' => ShipmentStatus::ReadyForDispatch]);
+                    $shipment->logs()->create([
+                        'user_id' => $request->user()->id,
+                        'status' => ShipmentStatus::ReadyForDispatch,
+                        'title' => 'Paiement complet — prêt à l’expédition',
+                        'ip_address' => $request->ip(),
+                    ]);
+                }
+            }
+
+            $shipment->refresh();
+
+            $shipment->logs()->create([
+                'user_id' => $request->user()->id,
+                'status' => $shipment->status,
+                'title' => 'Paiement enregistré : '.number_format($newAmount, 2).' '.($shipment->currency ?? 'USD').' ('.$label.')',
+                'description' => $data['notes'] ?? null,
+                'ip_address' => $request->ip(),
+            ]);
+        });
 
         return response()->json(['message' => 'Paiement enregistré avec succès.']);
+    }
+
+    public function updateInvoiceOptions(Request $request, Shipment $shipment): JsonResponse
+    {
+        $this->authorize('update', $shipment);
+
+        $request->validate([
+            'company_coverage_amount' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        $raw = $request->input('company_coverage_amount');
+        $shipment->update([
+            'company_coverage_amount' => $raw === null || $raw === '' ? null : round((float) $raw, 2),
+        ]);
+
+        $shipment->load([
+            'senderProfile',
+            'senderProfile.country',
+            'senderProfile.city',
+            'senderProfile.state',
+            'recipientProfile',
+            'recipientProfile.country',
+            'recipientProfile.city',
+            'recipientProfile.state',
+            'items.originCountry',
+            'agency',
+            'originCountry',
+            'destCountry',
+            'payments.recordedBy',
+        ]);
+
+        return response()->json([
+            'message' => 'Options de facture enregistrées.',
+            'shipment' => $this->buildShipmentListRow($shipment),
+        ]);
     }
 
     protected function estimatedDelivery(Shipment $s): ?Carbon
@@ -708,193 +747,180 @@ class ShipmentController extends Controller
     }
 
     /**
-     * @param  Collection<int, \App\Models\Office>  $officesById
-     * @param  Collection<string, \App\Models\Recipient>|null  $recipientMatchMap clé "{sender_id}|{email}" ou "c{sender_client_id}|{email}"
+     * @param  mixed  $value
+     */
+    protected function localeLabel($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_string($value)) {
+            $t = trim($value);
+
+            return $t !== '' ? $t : null;
+        }
+        if (is_array($value)) {
+            $pick = $value['fr'] ?? $value['en'] ?? reset($value);
+
+            return $this->localeLabel($pick);
+        }
+
+        return null;
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    protected function buildShipmentListRow(Shipment $s, Collection $officesById, ?Collection $recipientMatchMap): array
+    protected function buildShipmentListRow(Shipment $s): array
     {
         $data = $s->toArray();
-        $opts = $s->service_options ?? [];
-        $officeId = isset($opts['office_id']) ? (int) $opts['office_id'] : null;
-        $office = $officeId ? $officesById->get($officeId) : null;
-        $recipientRow = null;
-        if ($recipientMatchMap !== null && $s->relationLoaded('recipient') && $s->recipient?->email) {
-            $email = $s->recipient->email;
-            if ($s->sender_id) {
-                $recipientRow = $recipientMatchMap->get($s->sender_id.'|'.$email);
-            }
-            if ($recipientRow === null && $s->sender_client_id) {
-                $recipientRow = $recipientMatchMap->get('c'.$s->sender_client_id.'|'.$email);
-            }
-        }
-        $recipientRow ??= $this->resolveDestinationRecipient($s);
-        $data['corridor'] = [
-            'origin_country' => $office?->country,
-            'origin_city' => $office?->city,
-            'origin_name' => $office?->name,
-            'dest_country' => $recipientRow?->country,
-            'dest_city' => $recipientRow?->city,
+        unset($data['logs']);
+
+        $st = $s->status ?? ShipmentStatus::Draft;
+        $workflowSvc = app(ShipmentWorkflowService::class);
+        $data['status'] = [
+            'code' => $st->value,
+            'name' => $st->label(),
+            'color_hex' => $workflowSvc->colorHexForStatus($st),
         ];
+
+        if ($s->relationLoaded('logs')) {
+            $data['logs'] = $s->logs->sortBy('created_at')->values()->map(function (ShipmentLog $log) {
+                $ls = $log->status;
+
+                return [
+                    'id' => $log->id,
+                    'title' => $log->title,
+                    'description' => $log->description,
+                    'status' => $ls instanceof ShipmentStatus ? [
+                        'code' => $ls->value,
+                        'name' => $ls->label(),
+                    ] : null,
+                    'created_at' => $log->created_at?->toIso8601String(),
+                    'changed_at' => $log->created_at?->toIso8601String(),
+                    'changed_by_name' => $log->user?->name,
+                    'user_name' => $log->user?->name,
+                ];
+            })->all();
+        }
+
+        $opts = $s->service_options ?? [];
+        $rp = $s->recipientProfile;
+        $sp = $s->senderProfile;
+        $corridor = ShipmentRowPresenter::corridor($s);
+        $data['corridor'] = array_merge($corridor, ['origin_name' => null]);
+        $data['route_display'] = ShipmentRowPresenter::routeDisplay($corridor);
         $data['estimated_delivery_at'] = $this->estimatedDelivery($s)?->toIso8601String();
 
         // Champs attendus par le SPA (alias sur le modèle colonnes / relations)
         $data['tracking_number'] = $s->public_tracking;
-        $data['sender_name'] = $s->sender?->name
-            ?? $s->senderClient?->display_name
-            ?? trim(($s->senderClient?->first_name ?? '').' '.($s->senderClient?->last_name ?? ''))
-            ?: null;
-        $data['recipient_name'] = $s->deliveryRecipient?->name ?? $s->recipient?->name;
-        $data['recipient_city'] = $s->deliveryRecipient?->city ?? null;
+        $data['sender_name'] = $sp?->full_name;
+        $data['recipient_name'] = $rp?->full_name;
+        $data['recipient_city'] = $this->localeLabel($rp?->city?->name);
         $smId = (int) ($opts['shipping_mode_id'] ?? 0);
         if ($smId > 0) {
             $mode = ShippingMode::query()->find($smId);
             $data['shipping_mode'] = $mode?->name;
         } else {
-            $data['shipping_mode'] = $s->serviceType?->name;
+            $data['shipping_mode'] = null;
         }
-        $dtId = (int) ($opts['delivery_time_id'] ?? 0);
-        if ($dtId > 0) {
-            $dt = DeliveryTime::query()->find($dtId);
-            $label = $dt?->label;
-            if (is_array($label)) {
-                $data['delivery_time'] = (string) ($label['fr'] ?? $label['en'] ?? reset($label) ?? '');
-            } else {
-                $data['delivery_time'] = $label ? (string) $label : null;
-            }
-        } else {
-            $data['delivery_time'] = null;
-        }
+        $dtLabel = isset($opts['delivery_time_label']) ? trim((string) $opts['delivery_time_label']) : '';
+        $data['delivery_time'] = $dtLabel !== '' ? $dtLabel : null;
         $data['transport_company'] = isset($opts['transport_company_name']) ? (string) $opts['transport_company_name'] : null;
         $data['ship_line'] = isset($opts['ship_line_name']) ? (string) $opts['ship_line_name'] : null;
-        $data['total'] = $s->calculated_price !== null ? (float) $s->calculated_price : null;
+        $total = $s->calculated_price !== null ? (float) $s->calculated_price : null;
+        $data['total'] = $total;
+
+        $snap = is_array($s->pricing_snapshot) ? $s->pricing_snapshot : [];
+        $data['subtotal'] = isset($snap['subtotal']) ? (float) $snap['subtotal'] : null;
+        $data['tax_total'] = isset($snap['tax_amount']) ? (float) $snap['tax_amount'] : null;
+        if ($total === null && isset($snap['total'])) {
+            $total = (float) $snap['total'];
+            $data['total'] = $total;
+        }
+        $paid = (float) ($s->amount_paid ?? 0);
+        $data['balance_due'] = $total !== null ? round(max(0, $total - $paid), 2) : null;
+
+        $data['company_coverage_amount'] = $s->company_coverage_amount !== null
+            ? round((float) $s->company_coverage_amount, 2)
+            : null;
+
+        $ad = $s->assignedDriver;
+        $data['driver'] = $ad ? [
+            'id' => $ad->id,
+            'name' => $ad->name,
+            'phone' => $ad->phone,
+        ] : null;
+
+        if ($sp) {
+            $data['sender_email'] = $sp->email;
+            $data['sender_phone'] = $sp->phone;
+            $data['sender_phone_secondary'] = $sp->phone_secondary;
+            $data['sender_address'] = $sp->address;
+            $data['sender_landmark'] = $sp->landmark;
+            $data['sender_zip_code'] = $sp->zip_code;
+            $data['sender_city'] = $this->localeLabel($sp->city?->name);
+            $data['sender_state'] = $this->localeLabel($sp->state?->name);
+            $data['sender_country'] = $this->localeLabel($sp->country?->name);
+        }
+
+        if ($rp) {
+            $data['recipient_email'] = $rp->email;
+            $data['recipient_phone'] = $rp->phone;
+            $data['recipient_phone_secondary'] = $rp->phone_secondary;
+            $data['recipient_address'] = $rp->address;
+            $data['recipient_landmark'] = $rp->landmark;
+            $data['recipient_zip_code'] = $rp->zip_code;
+            $data['recipient_state'] = $this->localeLabel($rp->state?->name);
+            $data['recipient_country'] = $this->localeLabel($rp->country?->name);
+        }
+
+        if ($s->relationLoaded('payments')) {
+            $data['payments'] = $s->payments->map(function (ShipmentPayment $p) use ($s) {
+                return [
+                    'id' => $p->id,
+                    'amount' => (float) $p->amount,
+                    'currency' => $s->currency,
+                    'method' => $p->payment_method,
+                    'reference' => $p->reference,
+                    'note' => $p->notes,
+                    'created_at' => $p->created_at?->toIso8601String(),
+                    'recorded_by' => $p->recordedBy?->name,
+                ];
+            })->values()->all();
+        } else {
+            $data['payments'] = [];
+        }
+
+        if ($s->relationLoaded('regroupement') && $s->regroupement) {
+            $rg = $s->regroupement;
+            $rst = $rg->status ?? ShipmentStatus::Draft;
+            $workflowSvc = app(ShipmentWorkflowService::class);
+            $summaries = [];
+            if ($rg->relationLoaded('shipments')) {
+                $summaries = $rg->shipments
+                    ->map(fn (Shipment $sh) => ShipmentRowPresenter::summaryForRegroupement($sh))
+                    ->values()
+                    ->all();
+            }
+            $data['regroupement'] = [
+                'id' => $rg->id,
+                'batch_number' => $rg->batch_number,
+                'status' => [
+                    'code' => $rst->value,
+                    'name' => $rst->label(),
+                    'color_hex' => $workflowSvc->colorHexForStatus($rst),
+                ],
+                'shipments_in_lot' => $summaries,
+                'lot_route' => ShipmentRowPresenter::aggregateLotRoute($summaries),
+                'same_lot_count' => $rg->relationLoaded('shipments') ? $rg->shipments->count() : null,
+            ];
+        }
 
         return $data;
     }
 
-    protected function resolveDestinationRecipient(Shipment $s): ?Recipient
-    {
-        if ($s->delivery_recipient_id) {
-            return Recipient::query()->find($s->delivery_recipient_id);
-        }
-
-        $ru = $s->recipient;
-        if (! $ru?->email) {
-            return null;
-        }
-
-        if ($s->sender_client_id) {
-            $byCrm = Recipient::query()
-                ->where('crm_client_id', $s->sender_client_id)
-                ->where('is_active', true)
-                ->where(function ($q) use ($ru) {
-                    $q->where('email', $ru->email);
-                    if ($ru->name) {
-                        $q->orWhere('name', $ru->name);
-                    }
-                })
-                ->orderBy('id')
-                ->first();
-            if ($byCrm) {
-                return $byCrm;
-            }
-        }
-
-        if ($s->sender_id) {
-            $bySender = Recipient::query()
-                ->where('user_id', $s->sender_id)
-                ->where('is_active', true)
-                ->where(function ($q) use ($ru) {
-                    $q->where('email', $ru->email);
-                    if ($ru->name) {
-                        $q->orWhere('name', $ru->name);
-                    }
-                })
-                ->orderBy('id')
-                ->first();
-
-            if ($bySender) {
-                return $bySender;
-            }
-        }
-
-        return Recipient::query()
-            ->where('is_active', true)
-            ->where('email', $ru->email)
-            ->orderBy('id')
-            ->first();
-    }
-
-    /**
-     * @param  Collection<int, Shipment>  $shipments
-     * @return Collection<string, Recipient>
-     */
-    protected function bulkResolveRecipientsForShipments(Collection $shipments): Collection
-    {
-        $map = collect();
-        if ($shipments->isEmpty()) {
-            return $map;
-        }
-
-        $senderIds = $shipments->pluck('sender_id')->unique()->filter()->values();
-        $senderClientIds = $shipments->pluck('sender_client_id')->unique()->filter()->values();
-        $emails = $shipments->map(fn (Shipment $s) => $s->recipient?->email)->filter()->unique()->values();
-        if ($emails->isEmpty() || ($senderIds->isEmpty() && $senderClientIds->isEmpty())) {
-            return $map;
-        }
-
-        $candidates = Recipient::query()
-            ->whereIn('email', $emails)
-            ->where('is_active', true)
-            ->where(function ($q) use ($senderIds, $senderClientIds) {
-                $added = false;
-                if ($senderIds->isNotEmpty()) {
-                    $q->whereIn('user_id', $senderIds);
-                    $added = true;
-                }
-                if ($senderClientIds->isNotEmpty()) {
-                    if ($added) {
-                        $q->orWhereIn('crm_client_id', $senderClientIds);
-                    } else {
-                        $q->whereIn('crm_client_id', $senderClientIds);
-                    }
-                }
-            })
-            ->orderBy('id')
-            ->get();
-
-        foreach ($candidates as $r) {
-            if ($r->user_id) {
-                $key = $r->user_id.'|'.$r->email;
-                if (! $map->has($key)) {
-                    $map->put($key, $r);
-                }
-            }
-            if ($r->crm_client_id) {
-                $key = 'c'.$r->crm_client_id.'|'.$r->email;
-                if (! $map->has($key)) {
-                    $map->put($key, $r);
-                }
-            }
-        }
-
-        return $map;
-    }
-
-    /**
-     * @return Collection<int, Office>
-     */
-    protected function prefetchOfficesForShipment(Shipment $s): Collection
-    {
-        $officeId = (int) (($s->service_options ?? [])['office_id'] ?? 0);
-        if ($officeId <= 0) {
-            return collect();
-        }
-
-        return Office::query()->where('id', $officeId)->get()->keyBy('id');
-    }
-
-    protected function getDriversForUser($user): \Illuminate\Support\Collection
+    protected function getDriversForUser($user): Collection
     {
         $q = User::query()->role('driver')->orderBy('name')->limit(100);
         if (! $user->canAccessAllAgencies()) {
@@ -969,8 +995,45 @@ class ShipmentController extends Controller
      *     declared_value_effective: float
      * }
      */
-    protected function computeWizardPricing(array $data, User $user, int $agencyId): array
+    /**
+     * Agence pour tarification / persistance : jamais 0 (MySQL refuse la FK), utiliser null si aucune agence.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function resolveWizardAgencyId(array $data, User $user): ?int
     {
+        $agencyId = (int) ($data['agency_id'] ?? $user->agency_id ?? 0);
+        if (! $user->canAccessAllAgencies()) {
+            $agencyId = (int) ($user->agency_id ?? 0);
+        } elseif (! empty($data['agency_id'])) {
+            $ok = Agency::query()->where('is_active', true)->whereKey((int) $data['agency_id'])->exists();
+            if (! $ok) {
+                $agencyId = (int) ($user->agency_id ?? 0);
+            }
+        }
+
+        return $agencyId > 0 ? $agencyId : null;
+    }
+
+    protected function computeWizardPricing(array $data, User $user, ?int $agencyId): array
+    {
+        $soIncoming = (array) ($data['service_options'] ?? []);
+        if (trim((string) ($data['delivery_time_label'] ?? '')) === '' && isset($soIncoming['delivery_time_label'])) {
+            $tl = trim((string) $soIncoming['delivery_time_label']);
+            if ($tl !== '') {
+                $data['delivery_time_label'] = $tl;
+            }
+        }
+
+        $itemLabels = collect($data['items'] ?? [])
+            ->map(fn ($i) => trim((string) ($i['delivery_time_label'] ?? '')))
+            ->filter(fn ($s) => $s !== '');
+        if ($itemLabels->isNotEmpty()) {
+            $uniq = $itemLabels->unique()->values();
+            $merged = $uniq->count() === 1 ? (string) $uniq->first() : $uniq->implode(' · ');
+            $data['delivery_time_label'] = $merged;
+        }
+
         $quotePayload = array_merge($data, ['agency_id' => $agencyId]);
         $slrIdEarly = isset($data['ship_line_rate_id']) ? (int) $data['ship_line_rate_id'] : 0;
         if ($slrIdEarly > 0) {
@@ -980,10 +1043,12 @@ class ShipmentController extends Controller
                     $data['shipping_mode_id'] = $earlyRate->shipping_mode_id;
                     $quotePayload['shipping_mode_id'] = $earlyRate->shipping_mode_id;
                 }
-                if (empty($data['delivery_time_id']) || $data['delivery_time_id'] === '' || $data['delivery_time_id'] === null) {
-                    if ($earlyRate->delivery_time_id) {
-                        $data['delivery_time_id'] = $earlyRate->delivery_time_id;
-                        $quotePayload['delivery_time_id'] = $earlyRate->delivery_time_id;
+                $curLabel = trim((string) ($data['delivery_time_label'] ?? ''));
+                if ($curLabel === '') {
+                    $ov = $earlyRate->delivery_label_override;
+                    if (is_string($ov) && trim($ov) !== '') {
+                        $data['delivery_time_label'] = trim($ov);
+                        $quotePayload['delivery_time_label'] = trim($ov);
                     }
                 }
             }
@@ -1070,17 +1135,16 @@ class ShipmentController extends Controller
             'manual_fee_label' => $manualFeeLabel,
         ]);
 
-        $oid = isset($data['office_id']) && $data['office_id'] !== '' && $data['office_id'] !== null ? (int) $data['office_id'] : null;
-        if ($oid !== null && $oid > 0) {
-            $serviceOptions['office_id'] = $oid;
-        }
         $smid = isset($data['shipping_mode_id']) && $data['shipping_mode_id'] !== '' && $data['shipping_mode_id'] !== null ? (int) $data['shipping_mode_id'] : null;
         if ($smid !== null && $smid > 0) {
             $serviceOptions['shipping_mode_id'] = $smid;
         }
-        $dtid = isset($data['delivery_time_id']) && $data['delivery_time_id'] !== '' && $data['delivery_time_id'] !== null ? (int) $data['delivery_time_id'] : null;
-        if ($dtid !== null && $dtid > 0) {
-            $serviceOptions['delivery_time_id'] = $dtid;
+        $dtLabelMerged = trim((string) ($data['delivery_time_label'] ?? ''));
+        if ($dtLabelMerged === '' && isset($optsEarly['delivery_time_label'])) {
+            $dtLabelMerged = trim((string) $optsEarly['delivery_time_label']);
+        }
+        if ($dtLabelMerged !== '') {
+            $serviceOptions['delivery_time_label'] = $dtLabelMerged;
         }
         $pkid = $packagingTypeIdStore;
         if ($pkid !== null && $pkid > 0) {
@@ -1184,10 +1248,10 @@ class ShipmentController extends Controller
         float $billableWeightKg,
         float $volumeM3,
     ): float {
-        $agencyId = (int) ($data['agency_id'] ?? $user->agency_id);
-        if (! $user->canAccessAllAgencies()) {
-            $agencyId = (int) $user->agency_id;
-        }
+        $rawAgency = $data['agency_id'] ?? $user->agency_id ?? null;
+        $engineAgencyId = ($rawAgency !== null && $rawAgency !== '' && (int) $rawAgency > 0)
+            ? (int) $rawAgency
+            : null;
 
         $fromLineRate = $this->tryShipLineRateBaseQuote($data, $billableWeightKg, $volumeM3);
         if ($fromLineRate !== null) {
@@ -1195,10 +1259,7 @@ class ShipmentController extends Controller
         }
 
         $engineQuote = PricingEngine::forContext(
-            agencyId: $agencyId,
-            serviceTypeId: isset($data['service_type_id']) && $data['service_type_id'] !== '' && $data['service_type_id'] !== null
-                ? (int) $data['service_type_id']
-                : null
+            agencyId: $engineAgencyId,
         )->quote([
             'real_weight_kg' => max($realWeight, 0.001),
             'volumetric_weight_kg' => max($volWeight, 0.001),
@@ -1210,117 +1271,13 @@ class ShipmentController extends Controller
             return $fromEngine;
         }
 
-        $opts = (array) ($data['service_options'] ?? []);
-        $shippingModeId = null;
-        if (isset($data['shipping_mode_id']) && $data['shipping_mode_id'] !== '' && $data['shipping_mode_id'] !== null) {
-            $shippingModeId = (int) $data['shipping_mode_id'];
-        } elseif (isset($opts['shipping_mode_id']) && $opts['shipping_mode_id'] !== '' && $opts['shipping_mode_id'] !== null) {
-            $shippingModeId = (int) $opts['shipping_mode_id'];
-        }
-        if ($shippingModeId === 0) {
-            $shippingModeId = null;
-        }
-
-        $officeId = null;
-        if (isset($data['office_id']) && $data['office_id'] !== '' && $data['office_id'] !== null) {
-            $officeId = (int) $data['office_id'];
-        } elseif (isset($opts['office_id']) && $opts['office_id'] !== '' && $opts['office_id'] !== null) {
-            $officeId = (int) $opts['office_id'];
-        }
-        if ($officeId === 0) {
-            $officeId = null;
-        }
-
-        $recipientId = isset($data['recipient_id']) ? (int) $data['recipient_id'] : null;
-        $originCountryId = $this->resolveOriginCountryIdFromOffice($officeId);
-        $destCountryId = $this->resolveDestinationCountryIdFromRecipient($recipientId);
-
-        $resolver = app(ShippingRateResolver::class);
-        $resolved = $resolver->resolve($agencyId, $originCountryId, $destCountryId, $shippingModeId);
-        $rate = $resolved['rate'];
-
-        if ($rate === null) {
-            return (float) ($fromEngine ?? 0);
-        }
-
-        return $resolver->computeBaseQuote($rate, $billableWeightKg, $volumeM3);
-    }
-
-    protected function resolveOriginCountryIdFromOffice(?int $officeId): ?int
-    {
-        if ($officeId === null || $officeId <= 0) {
-            return null;
-        }
-
-        $office = Office::query()->find($officeId);
-        if ($office === null) {
-            return null;
-        }
-
-        $raw = trim((string) ($office->country ?? ''));
-        if ($raw === '') {
-            return null;
-        }
-
-        return $this->lookupCountryIdByLabel($raw);
-    }
-
-    protected function resolveDestinationCountryIdFromRecipient(?int $recipientId): ?int
-    {
-        if ($recipientId === null || $recipientId <= 0) {
-            return null;
-        }
-
-        $recipient = Recipient::query()->find($recipientId);
-        if ($recipient === null) {
-            return null;
-        }
-
-        if ($recipient->country_id) {
-            return (int) $recipient->country_id;
-        }
-
-        $raw = trim((string) ($recipient->country ?? ''));
-
-        return $raw !== '' ? $this->lookupCountryIdByLabel($raw) : null;
-    }
-
-    protected function lookupCountryIdByLabel(string $label): ?int
-    {
-        $label = trim($label);
-        if ($label === '') {
-            return null;
-        }
-
-        $upper = mb_strtoupper($label);
-        if (strlen($label) === 2) {
-            $id = Country::query()->where('iso2', $upper)->value('id');
-
-            return $id ? (int) $id : null;
-        }
-        if (strlen($label) === 3) {
-            $id = Country::query()
-                ->where(function ($q) use ($upper) {
-                    $q->where('iso3', $upper)->orWhere('code', $upper);
-                })
-                ->value('id');
-
-            return $id ? (int) $id : null;
-        }
-
-        $lower = mb_strtolower($label);
-
-        return Country::query()
-            ->where(function ($q) use ($lower) {
-                $q->whereRaw('LOWER(name) = ?', [$lower])
-                    ->orWhereRaw('LOWER(COALESCE(native, \'\')) = ?', [$lower]);
-            })
-            ->value('id');
+        // Legacy ShippingRateResolver removed — fallback to engine result
+        return (float) ($fromEngine ?? 0);
     }
 
     protected function volumetricDivisorValue(): float
     {
-        return max(1.0, (float) (\App\Models\Setting::getValue('volumetric_divisor', '5000') ?: 5000));
+        return max(1.0, (float) (Setting::getValue('volumetric_divisor', '5000') ?: 5000));
     }
 
     /**
@@ -1335,9 +1292,6 @@ class ShipmentController extends Controller
         if ($slrId > 0) {
             $slr = ShipLineRate::query()->with('shippingMode')->find($slrId);
             if ($slr && $slr->is_active) {
-                if ($slr->volumetric_divisor) {
-                    return max(1.0, (float) $slr->volumetric_divisor);
-                }
                 $mode = $slr->shippingMode;
                 if ($mode && $mode->volumetric_divisor) {
                     return max(1.0, (float) $mode->volumetric_divisor);
@@ -1405,5 +1359,15 @@ class ShipmentController extends Controller
         }
 
         return $slr->computeBaseQuote($billableWeightKg, $volumeM3);
+    }
+
+    private function shipmentStatusAllowsDriverAssignment(ShipmentStatus $status): bool
+    {
+        return match ($status) {
+            ShipmentStatus::PendingDropOff => true,
+            ShipmentStatus::InTransit,
+            ShipmentStatus::ArrivedAtDestination => true,
+            default => false,
+        };
     }
 }

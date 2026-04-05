@@ -2,14 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Consolidation;
+use App\Enums\PickupStatus;
+use App\Enums\ShipmentStatus;
 use App\Models\CustomerPackage;
 use App\Models\Pickup;
 use App\Models\PreAlert;
+use App\Models\Profile;
 use App\Models\PurchaseOrder;
+use App\Models\Regroupement;
 use App\Models\Shipment;
-use App\Models\Status;
 use App\Models\User;
+use App\Services\ShipmentWorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -41,17 +44,12 @@ class SectionDashboardController extends Controller
             $poQ->where('agency_id', $user->agency_id);
         }
 
-        $paymentCodes = ['payment_pending', 'pending_payment'];
-        $awaitingPaymentIds = Status::query()->whereIn('code', $paymentCodes)->pluck('id');
-
         $stats = [
             'pre_alerts_month' => (clone $preQ)->where('created_at', '>=', now()->startOfMonth())->count(),
             'packages_received_today' => (clone $pkgQ)->whereDate('received_at', today())->count(),
-            'awaiting_payment' => $awaitingPaymentIds->isEmpty()
-                ? 0
-                : (clone $pkgQ)->whereIn('status_id', $awaitingPaymentIds)->count(),
+            'awaiting_payment' => (clone $pkgQ)->where('status', ShipmentStatus::ReceivedAtHub)->count(),
             'purchase_orders_pending' => (clone $poQ)
-                ->whereHas('status', fn ($s) => $s->whereIn('code', ['created', 'quoted', 'paid', 'purchasing']))
+                ->whereIn('status', ['draft', 'quoted', 'paid', 'purchasing'])
                 ->count(),
         ];
 
@@ -67,18 +65,20 @@ class SectionDashboardController extends Controller
         }
 
         $distRows = (clone $pkgQ)
-            ->select('customer_packages.status_id', DB::raw('COUNT(*) as c'))
-            ->whereNotNull('customer_packages.status_id')
-            ->groupBy('customer_packages.status_id')
+            ->select('customer_packages.status', DB::raw('COUNT(*) as c'))
+            ->whereNotNull('customer_packages.status')
+            ->groupBy('customer_packages.status')
             ->get();
 
-        $status_distribution = $distRows->map(function ($row) {
-            $st = Status::query()->find($row->status_id);
+        $workflow = app(ShipmentWorkflowService::class);
+
+        $status_distribution = $distRows->map(function ($row) use ($workflow) {
+            $enum = ShipmentStatus::tryFromString($row->status);
 
             return [
-                'name' => $st?->name ?? '—',
+                'name' => $enum?->label() ?? '—',
                 'value' => (int) $row->c,
-                'color' => $st?->color_hex,
+                'color' => $enum ? $workflow->colorHexForStatus($enum) : '#64748B',
             ];
         })->values()->all();
 
@@ -98,22 +98,21 @@ class SectionDashboardController extends Controller
         );
 
         $base = Shipment::query();
-        $this->scopeShipmentsFor($base, $user);
+        $this->scopeShipmentsForUser($base, $user);
 
-        $activeCodes = ['created', 'accepted', 'in_preparation', 'collected', 'in_transit', 'in_customs', 'arrived', 'out_for_delivery'];
-        $inTransitCodes = ['in_transit', 'in_customs'];
+        $terminal = [ShipmentStatus::Delivered->value, ShipmentStatus::Cancelled->value];
 
-        $active = (clone $base)->whereHas('status', fn ($s) => $s->whereIn('code', $activeCodes))->count();
+        $active = (clone $base)->whereNotIn('status', $terminal)->count();
         $created_today = (clone $base)->whereDate('created_at', today())->count();
-        $in_transit = (clone $base)->whereHas('status', fn ($s) => $s->whereIn('code', $inTransitCodes))->count();
+        $in_transit = (clone $base)->where('status', ShipmentStatus::InTransit)->count();
 
         $startMonth = now()->startOfMonth();
         $delivered_month = (clone $base)
-            ->whereHas('status', fn ($s) => $s->where('code', 'delivered'))
+            ->where('status', ShipmentStatus::Delivered)
             ->where('updated_at', '>=', $startMonth)
             ->count();
 
-        $total_done = (clone $base)->whereHas('status', fn ($s) => $s->where('code', 'delivered'))->count();
+        $total_done = (clone $base)->where('status', ShipmentStatus::Delivered)->count();
         $delivery_rate = $total_done + $active > 0 ? (int) round(100 * $total_done / max(1, $total_done + $active)) : 0;
 
         $deliveredSample = (clone $base)
@@ -171,7 +170,11 @@ class SectionDashboardController extends Controller
         $stats = [
             'today' => (clone $q)->whereDate('created_at', today())->count(),
             'week' => (clone $q)->where('created_at', '>=', now()->subDays(7))->count(),
-            'open' => (clone $q)->whereDoesntHave('status', fn ($s) => $s->whereIn('code', ['pickup_collected', 'pickup_at_hub']))->count(),
+            'open' => (clone $q)->whereNotIn('status', [
+                PickupStatus::Collected->value,
+                PickupStatus::Completed->value,
+                PickupStatus::Cancelled->value,
+            ])->count(),
         ];
 
         return response()->json([
@@ -179,16 +182,22 @@ class SectionDashboardController extends Controller
         ]);
     }
 
-    public function consolidations(Request $request): JsonResponse
+    public function regroupements(Request $request): JsonResponse
     {
         $user = $request->user();
-        abort_unless($user->can('view_consolidations'), 403);
+        abort_unless($user->hasAnyPermission([
+            'view_regroupements', 'view_consolidations',
+            'manage_regroupements', 'manage_consolidations',
+        ]), 403);
 
-        $q = Consolidation::query();
+        $q = Regroupement::query();
         $this->scopeByAgency($q, $user);
 
         $stats = [
-            'open' => (clone $q)->whereDoesntHave('status', fn ($s) => $s->where('code', 'cons_distributed'))->count(),
+            'open' => (clone $q)->whereNotIn('status', [
+                ShipmentStatus::Delivered->value,
+                ShipmentStatus::Cancelled->value,
+            ])->count(),
             'this_month' => (clone $q)->where('created_at', '>=', now()->startOfMonth())->count(),
         ];
 
@@ -207,21 +216,18 @@ class SectionDashboardController extends Controller
             403
         );
 
-        $recipientsQ = \App\Models\Recipient::query();
+        $profilesQ = Profile::query();
         if (! $user->canAccessAllAgencies()) {
-            $recipientsQ->where(function ($q) use ($user) {
-                $q->whereHas('user', fn ($u) => $u->where('agency_id', $user->agency_id))
-                    ->orWhereHas('crmClient', fn ($c) => $c->where('agency_id', $user->agency_id));
-            });
+            $profilesQ->where('agency_id', $user->agency_id);
         }
 
         $stats = [
-            'recipients' => (clone $recipientsQ)->count(),
+            'recipients' => (clone $profilesQ)->count(),
         ];
 
         $showClients = $user->can('manage_clients');
         if ($showClients) {
-            $clientsQ = \App\Models\CrmClient::query();
+            $clientsQ = Profile::query();
             if (! $user->canAccessAllAgencies()) {
                 $clientsQ->where('agency_id', $user->agency_id);
             }

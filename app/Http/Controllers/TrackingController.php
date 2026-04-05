@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Shipment;
+use Illuminate\Http\JsonResponse;
 
 class TrackingController extends Controller
 {
@@ -10,7 +11,10 @@ class TrackingController extends Controller
     {
         $shipment = Shipment::query()
             ->where('public_tracking', $publicTracking)
-            ->with(['status', 'currentHub', 'logs' => fn ($q) => $q->latest('created_at')])
+            ->with([
+                'currentHub',
+                'logs' => fn ($q) => $q->with('user')->orderByDesc('created_at'),
+            ])
             ->firstOrFail();
 
         return response()->json([

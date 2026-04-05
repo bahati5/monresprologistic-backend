@@ -5,16 +5,18 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class Office extends Model
+class BillingExtra extends Model
 {
     protected $fillable = [
-        'agency_id', 'type', 'name', 'address', 'city', 'country',
-        'contact_name', 'contact_phone', 'contact_phone_secondary', 'contact_email', 'is_active',
+        'agency_id', 'label', 'calculation_description', 'type', 'value', 'is_active', 'sort_order',
     ];
 
     protected function casts(): array
     {
-        return ['is_active' => 'boolean'];
+        return [
+            'value' => 'decimal:4',
+            'is_active' => 'boolean',
+        ];
     }
 
     public function agency(): BelongsTo

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Settings;
 
 use App\Http\Controllers\Controller;
+use App\Models\City;
+use App\Models\Country;
 use App\Models\Setting;
 use App\Support\ShipmentDocumentSettings;
 use Illuminate\Http\JsonResponse;
@@ -13,11 +15,12 @@ class AppSettingController extends Controller
     private const IDENTITY_KEYS = [
         'site_name', 'site_url', 'site_email', 'nit', 'phone_fixed',
         'phone_mobile', 'phone_fixed_secondary', 'phone_mobile_secondary',
-        'address', 'country', 'country_id', 'city', 'zip_code',
+        'address', 'country', 'country_id', 'state_id', 'city_id', 'city', 'zip_code',
     ];
 
     private const LOCKER_KEYS = [
         'locker_address_template', 'locker_mode', 'locker_digits', 'locker_prefix',
+        'locker_code_format', 'locker_next_seq', 'locker_seq_pad',
     ];
 
     private const ACCOUNT_KEYS = [
@@ -32,13 +35,24 @@ class AppSettingController extends Controller
 
     private const SHIPMENT_CONFIG_KEYS = [
         'tracking_prefix', 'tracking_number_length',
+        'shipment_tracking_format', 'shipment_tracking_next_seq', 'shipment_tracking_seq_pad',
         'volumetric_divisor',
         'default_insurance_pct', 'default_customs_duty_pct', 'default_tax_pct',
+        'shipment_invoice_format', 'shipment_invoice_prefix', 'shipment_invoice_seq_pad', 'shipment_invoice_next_seq',
+    ];
+
+    private const NUMBERING_KEYS = [
+        'finance_invoice_format', 'finance_invoice_prefix', 'finance_invoice_seq_pad', 'finance_invoice_next_seq',
+        'prealert_reference_format', 'prealert_reference_prefix', 'prealert_reference_seq_pad', 'prealert_next_seq',
+        'purchase_order_reference_format', 'purchase_order_reference_prefix', 'purchase_order_reference_seq_pad', 'purchase_order_next_seq',
+        'customer_package_reference_format', 'customer_package_reference_prefix', 'customer_package_reference_seq_pad', 'customer_package_next_seq',
     ];
 
     /** Autres clés métier présentes en base (documents, etc.) — pour ne pas les « perdre » côté UI. */
     private const EXTRA_APP_KEYS = [
         'invoice_terms', 'signing_company', 'signing_customer',
+        'default_company_coverage_amount',
+        'show_sidebar_brand_with_logo',
     ];
 
     /**
@@ -60,6 +74,7 @@ class AppSettingController extends Controller
             self::ACCOUNT_KEYS,
             self::GENERAL_KEYS,
             self::SHIPMENT_CONFIG_KEYS,
+            self::NUMBERING_KEYS,
             self::EXTRA_APP_KEYS,
             ['hub_brand_name']
         ));
@@ -80,13 +95,22 @@ class AppSettingController extends Controller
 
         $logoPath = $fromDb['logo_path'] ?? null;
         $faviconPath = $fromDb['favicon_path'] ?? null;
-        $settings['logo_url'] = $logoPath ? ShipmentDocumentSettings::publicStorageUrl($logoPath) : null;
-        $settings['favicon_url'] = $faviconPath ? ShipmentDocumentSettings::publicStorageUrl($faviconPath) : null;
+        $settings['logo_url'] = $logoPath ? ShipmentDocumentSettings::publicStorageWebPath($logoPath) : null;
+        $settings['favicon_url'] = $faviconPath ? ShipmentDocumentSettings::publicStorageWebPath($faviconPath) : null;
 
         unset($settings['logo_path'], $settings['favicon_path']);
 
-        if (($settings['hub_brand_name'] ?? '') === '') {
-            $settings['hub_brand_name'] = 'Monrespro';
+        if (($settings['show_sidebar_brand_with_logo'] ?? '') === '') {
+            $settings['show_sidebar_brand_with_logo'] = '1';
+        }
+
+        $countryId = (int) ($settings['country_id'] ?? 0);
+        $settings['country_iso2'] = '';
+        if ($countryId > 0) {
+            $iso = Country::query()->whereKey($countryId)->value('iso2');
+            if ($iso !== null && $iso !== '') {
+                $settings['country_iso2'] = strtoupper(trim((string) $iso));
+            }
         }
 
         ksort($settings);
@@ -110,6 +134,8 @@ class AppSettingController extends Controller
             'address' => ['nullable', 'string', 'max:500'],
             'country' => ['nullable', 'string', 'max:100'],
             'country_id' => ['nullable', 'integer', 'exists:countries,id'],
+            'state_id' => ['nullable', 'integer', 'exists:states,id'],
+            'city_id' => ['nullable', 'integer', 'exists:cities,id'],
             'city' => ['nullable', 'string', 'max:100'],
             'zip_code' => ['nullable', 'string', 'max:16'],
             'hub_brand_name' => ['nullable', 'string', 'max:255'],
@@ -117,6 +143,9 @@ class AppSettingController extends Controller
             'locker_mode' => ['nullable', 'string', 'in:random,sequential'],
             'locker_digits' => ['nullable', 'integer', 'min:2', 'max:10'],
             'locker_prefix' => ['nullable', 'string', 'max:16'],
+            'locker_code_format' => ['nullable', 'string', 'max:120'],
+            'locker_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
+            'locker_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
             'auto_verification' => ['nullable', 'string'],
             'registration_enabled' => ['nullable', 'string'],
             'admin_notification_on_signup' => ['nullable', 'string'],
@@ -131,17 +160,52 @@ class AppSettingController extends Controller
             'custom_currencies' => ['nullable', 'string', 'max:10000'],
             'tracking_prefix' => ['nullable', 'string', 'max:16'],
             'tracking_number_length' => ['nullable', 'integer', 'min:4', 'max:32'],
+            'shipment_tracking_format' => ['nullable', 'string', 'max:120'],
+            'shipment_tracking_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
+            'shipment_tracking_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
             'volumetric_divisor' => ['nullable', 'integer', 'min:1', 'max:99999'],
             'default_insurance_pct' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'default_customs_duty_pct' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'default_tax_pct' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'shipment_invoice_format' => ['nullable', 'string', 'max:120'],
+            'shipment_invoice_prefix' => ['nullable', 'string', 'max:32'],
+            'shipment_invoice_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'shipment_invoice_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
+            'finance_invoice_format' => ['nullable', 'string', 'max:120'],
+            'finance_invoice_prefix' => ['nullable', 'string', 'max:32'],
+            'finance_invoice_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'finance_invoice_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
+            'prealert_reference_format' => ['nullable', 'string', 'max:120'],
+            'prealert_reference_prefix' => ['nullable', 'string', 'max:32'],
+            'prealert_reference_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'prealert_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
+            'purchase_order_reference_format' => ['nullable', 'string', 'max:120'],
+            'purchase_order_reference_prefix' => ['nullable', 'string', 'max:32'],
+            'purchase_order_reference_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'purchase_order_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
+            'customer_package_reference_format' => ['nullable', 'string', 'max:120'],
+            'customer_package_reference_prefix' => ['nullable', 'string', 'max:32'],
+            'customer_package_reference_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'customer_package_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
             'invoice_terms' => ['nullable', 'string', 'max:10000'],
             'signing_company' => ['nullable', 'string', 'max:255'],
             'signing_customer' => ['nullable', 'string', 'max:255'],
+            'default_company_coverage_amount' => ['nullable', 'numeric', 'min:0'],
+            'show_sidebar_brand_with_logo' => ['nullable', 'string', 'in:0,1'],
         ]);
 
-        if (! empty($data['country_id'] ?? null)) {
-            $c = \App\Models\Country::query()->find((int) $data['country_id']);
+        if (! empty($data['city_id'] ?? null)) {
+            $city = City::query()->with('country')->find((int) $data['city_id']);
+            if ($city) {
+                $data['city'] = $city->name;
+                $data['state_id'] = (string) $city->state_id;
+                $data['country_id'] = (string) $city->country_id;
+                if ($city->relationLoaded('country') && $city->country) {
+                    $data['country'] = $city->country->name;
+                }
+            }
+        } elseif (! empty($data['country_id'] ?? null)) {
+            $c = Country::query()->find((int) $data['country_id']);
             if ($c) {
                 $data['country'] = $c->name;
             }
@@ -154,6 +218,40 @@ class AppSettingController extends Controller
         return response()->json(['message' => 'Paramètres enregistrés.']);
     }
 
+    /**
+     * Identité visuelle lisible par tous (sans permission manage_settings) : sidebar, favicon, pages publiques.
+     */
+    public function branding(): JsonResponse
+    {
+        $keys = [
+            'logo_path', 'favicon_path', 'site_name', 'hub_brand_name', 'show_sidebar_brand_with_logo',
+            'currency', 'currency_symbol', 'symbol_position',
+        ];
+        $fromDb = Setting::query()->whereIn('key', $keys)->pluck('value', 'key')->all();
+
+        $logoPath = $fromDb['logo_path'] ?? null;
+        $faviconPath = $fromDb['favicon_path'] ?? null;
+        $showBrand = $fromDb['show_sidebar_brand_with_logo'] ?? '';
+        if ($showBrand === '') {
+            $showBrand = '1';
+        }
+
+        $currency = trim((string) ($fromDb['currency'] ?? '')) !== '' ? trim((string) $fromDb['currency']) : 'EUR';
+        $symbolRaw = trim((string) ($fromDb['currency_symbol'] ?? ''));
+        $symbolPosition = ($fromDb['symbol_position'] ?? '') === 'suffix' ? 'after' : 'before';
+
+        return response()->json([
+            'logo_url' => $logoPath ? ShipmentDocumentSettings::publicStorageWebPath($logoPath) : null,
+            'favicon_url' => $faviconPath ? ShipmentDocumentSettings::publicStorageWebPath($faviconPath) : null,
+            'site_name' => (string) ($fromDb['site_name'] ?? ''),
+            'hub_brand_name' => (string) ($fromDb['hub_brand_name'] ?? ''),
+            'show_sidebar_brand_with_logo' => $showBrand,
+            'currency' => $currency,
+            'currency_symbol' => $symbolRaw,
+            'currency_position' => $symbolPosition,
+        ]);
+    }
+
     public function uploadLogo(Request $request): JsonResponse
     {
         $request->validate([
@@ -163,7 +261,10 @@ class AppSettingController extends Controller
         $path = $request->file('logo')->store('branding', 'public');
         Setting::setValue('logo_path', $path);
 
-        return response()->json(['message' => 'Logo mis à jour.']);
+        return response()->json([
+            'message' => 'Logo mis à jour.',
+            'logo_url' => ShipmentDocumentSettings::publicStorageWebPath($path),
+        ]);
     }
 
     public function uploadFavicon(Request $request): JsonResponse
@@ -175,6 +276,9 @@ class AppSettingController extends Controller
         $path = $request->file('favicon')->store('branding', 'public');
         Setting::setValue('favicon_path', $path);
 
-        return response()->json(['message' => 'Favicon mis à jour.']);
+        return response()->json([
+            'message' => 'Favicon mis à jour.',
+            'favicon_url' => ShipmentDocumentSettings::publicStorageWebPath($path),
+        ]);
     }
 }

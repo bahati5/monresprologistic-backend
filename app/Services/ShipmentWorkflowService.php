@@ -2,128 +2,133 @@
 
 namespace App\Services;
 
+use App\Enums\ShipmentStatus;
 use App\Models\Shipment;
-use App\Models\Status;
 use Illuminate\Support\Collection;
 
 class ShipmentWorkflowService
 {
-    /** @var array<string, string> Map status code to label */
-    protected array $stepLabels = [
-        'created' => 'Créée',
-        'accepted' => 'Acceptée',
-        'in_preparation' => 'En préparation',
-        'collected' => 'Collectée',
-        'in_transit' => 'En transit',
-        'in_customs' => 'En douane',
-        'arrived' => 'Arrivée',
-        'out_for_delivery' => 'En livraison',
-        'delivered' => 'Livrée',
-        'cancelled' => 'Annulée',
-    ];
+    /**
+     * Étapes affichées : pré-alerte = en attente dépôt → hub → … ; comptoir = brouillon → hub → … (sans étape pré-alerte).
+     *
+     * @return list<ShipmentStatus>
+     */
+    public function displayFlowFor(Shipment $shipment): array
+    {
+        if ($shipment->pre_alert_id) {
+            return [
+                ShipmentStatus::PendingDropOff,
+                ShipmentStatus::ReceivedAtHub,
+                ShipmentStatus::ReadyForDispatch,
+                ShipmentStatus::InTransit,
+                ShipmentStatus::ArrivedAtDestination,
+                ShipmentStatus::Delivered,
+            ];
+        }
+
+        return [
+            ShipmentStatus::Draft,
+            ShipmentStatus::ReceivedAtHub,
+            ShipmentStatus::ReadyForDispatch,
+            ShipmentStatus::InTransit,
+            ShipmentStatus::ArrivedAtDestination,
+            ShipmentStatus::Delivered,
+        ];
+    }
 
     /**
-     * Build workflow steps for display based on shipment logs and current status.
+     * Étapes pour le suivi visuel (ordre métier unifié).
      *
-     * @return array<int, array{code: string, label: string, color?: string, completed: bool, current: bool, date?: string}>
+     * @return array<int, array{code: string, label: string, color?: string, completed: bool, current: bool, date?: string|null}>
      */
     public function buildStepsForShipment(Shipment $shipment): array
     {
-        $logs = $shipment->logs()->with('status')->orderBy('created_at')->get();
-        $currentStatus = $shipment->status;
+        $logs = $shipment->logs()->orderBy('created_at')->get();
+        $current = $shipment->status ?? ShipmentStatus::Draft;
 
-        $orderedCodes = ['created', 'accepted', 'in_preparation', 'collected', 'in_transit', 'in_customs', 'arrived', 'out_for_delivery', 'delivered'];
+        $flow = $this->displayFlowFor($shipment);
+        $flowValues = array_map(fn (ShipmentStatus $s) => $s->value, $flow);
+        if (! in_array($current->value, $flowValues, true) && $current !== ShipmentStatus::Cancelled) {
+            $flow = ShipmentStatus::orderedFlow();
+        }
+
         $completedByLog = [];
         foreach ($logs as $l) {
-            if ($l->status_id && $l->status) {
-                $completedByLog[$l->status->code] = $l->created_at;
+            if ($l->status instanceof ShipmentStatus) {
+                $completedByLog[$l->status->value] = $l->created_at;
             }
         }
 
+        $orderValues = array_map(fn (ShipmentStatus $s) => $s->value, $flow);
+        $curRank = array_search($current->value, $orderValues, true);
+
         $steps = [];
-        foreach ($orderedCodes as $code) {
-            $status = Status::query()->where('code', $code)->first();
-            if (! $status) {
-                continue;
-            }
-            $completed = isset($completedByLog[$code]) || ($currentStatus && $this->isAfterOrEqual($code, $currentStatus->code, $orderedCodes));
-            $current = $currentStatus && $currentStatus->code === $code;
+        foreach ($flow as $step) {
+            $code = $step->value;
+            $stepRank = array_search($code, $orderValues, true);
+            $completed = $curRank !== false && $stepRank !== false && $stepRank < $curRank;
+            $isCurrent = $current->value === $code;
             $date = $completedByLog[$code] ?? null;
 
             $steps[] = [
                 'code' => $code,
-                'label' => is_array($status->name) ? ($status->name['fr'] ?? $status->name['en'] ?? reset($status->name) ?? $code) : (string) $status->name,
-                'color' => $status->color_hex ?? null,
+                'label' => $step->label(),
+                'color' => $this->colorFor($step),
                 'completed' => $completed,
-                'current' => $current,
-                'date' => $date ? (is_string($date) ? $date : $date->format('Y-m-d H:i:s')) : null,
+                'current' => $isCurrent,
+                'date' => $date ? $date->format('Y-m-d H:i:s') : null,
             ];
         }
 
-        if ($currentStatus && $currentStatus->code === 'cancelled') {
+        if ($current === ShipmentStatus::Cancelled) {
             $steps[] = [
-                'code' => 'cancelled',
-                'label' => $this->stepLabels['cancelled'] ?? 'Annulée',
-                'color' => $currentStatus->color_hex ?? '#ef4444',
+                'code' => ShipmentStatus::Cancelled->value,
+                'label' => ShipmentStatus::Cancelled->label(),
+                'color' => '#ef4444',
                 'completed' => true,
                 'current' => true,
                 'date' => $logs->last()?->created_at?->format('Y-m-d H:i:s'),
             ];
         }
 
-        return array_values($steps);
+        return $steps;
     }
 
-    protected function isAfterOrEqual(string $code, string $currentCode, array $ordered): bool
+    public function colorHexForStatus(ShipmentStatus $s): string
     {
-        $idx = array_search($code, $ordered, true);
-        $curIdx = array_search($currentCode, $ordered, true);
-
-        return $idx !== false && $curIdx !== false && $curIdx > $idx;
+        return $this->colorFor($s);
     }
 
-    /** @var array<string, string[]> Fallback transitions when status_transitions table is empty */
-    protected array $fallbackTransitions = [
-        'created' => ['accepted', 'cancelled'],
-        'accepted' => ['in_preparation', 'cancelled'],
-        'in_preparation' => ['collected', 'cancelled'],
-        'collected' => ['in_transit'],
-        'in_transit' => ['in_customs', 'arrived'],
-        'in_customs' => ['arrived'],
-        'arrived' => ['out_for_delivery'],
-        'out_for_delivery' => ['delivered'],
-    ];
+    private function colorFor(ShipmentStatus $s): string
+    {
+        return match ($s) {
+            ShipmentStatus::Draft => '#64748b',
+            ShipmentStatus::PendingDropOff => '#0ea5e9',
+            ShipmentStatus::ReceivedAtHub => '#14b8a6',
+            ShipmentStatus::ReadyForDispatch => '#f59e0b',
+            ShipmentStatus::InTransit => '#8b5cf6',
+            ShipmentStatus::ArrivedAtDestination => '#06b6d4',
+            ShipmentStatus::Delivered => '#10b981',
+            ShipmentStatus::Cancelled => '#ef4444',
+        };
+    }
 
     /**
-     * Get statuses that can be transitioned to from the current shipment status.
-     *
-     * @return \Illuminate\Support\Collection<int, Status>
+     * @return Collection<int, array{code: string, label: string}>
      */
-    public function getAvailableTransitions(Shipment $shipment): \Illuminate\Support\Collection
+    public function getAvailableTransitions(Shipment $shipment): Collection
     {
-        $current = $shipment->status_id;
-        $currentCode = $shipment->status?->code;
+        $current = $shipment->status ?? ShipmentStatus::Draft;
+        $next = collect($current->allowedNext());
 
-        $ids = \DB::table('status_transitions')
-            ->where('from_status_id', $current)
-            ->pluck('to_status_id');
-
-        if ($ids->isEmpty() && $currentCode && isset($this->fallbackTransitions[$currentCode])) {
-            return Status::query()
-                ->whereIn('code', $this->fallbackTransitions[$currentCode])
-                ->where('is_active', true)
-                ->orderBy('sort_order')
-                ->get();
+        // Flux comptoir : pas de passage par « en attente de dépôt ».
+        if ($current === ShipmentStatus::Draft && ! $shipment->pre_alert_id) {
+            $next = $next->reject(fn (ShipmentStatus $s) => $s === ShipmentStatus::PendingDropOff)->values();
         }
 
-        if ($ids->isEmpty()) {
-            if (! $current) {
-                return Status::query()->whereIn('code', ['accepted', 'cancelled'])->orderBy('sort_order')->get();
-            }
-
-            return collect();
-        }
-
-        return Status::query()->whereIn('id', $ids)->where('is_active', true)->orderBy('sort_order')->get();
+        return $next->map(fn (ShipmentStatus $s) => [
+            'code' => $s->value,
+            'label' => $s->label(),
+        ]);
     }
 }

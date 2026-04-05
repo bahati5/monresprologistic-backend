@@ -13,7 +13,6 @@ class PricingRule extends Model
         'conditions',
         'agency_id',
         'zone_id',
-        'service_type_id',
         'priority',
         'is_active',
     ];
@@ -34,10 +33,5 @@ class PricingRule extends Model
     public function zone(): BelongsTo
     {
         return $this->belongsTo(Zone::class);
-    }
-
-    public function serviceType(): BelongsTo
-    {
-        return $this->belongsTo(ServiceType::class);
     }
 }

@@ -23,11 +23,13 @@ yarn-error.log
 /.vscode
 /.zed
 
-# Ignore migrations
-/database/migrations/
+# Migrations are now tracked
+# /database/migrations/
 
 # OS
 .DS_Store
 Thumbs.db
 
 .sql
+
+/database/migrations/

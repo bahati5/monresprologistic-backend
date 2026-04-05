@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\ConfigurableReferenceCode;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -13,7 +14,7 @@ class PurchaseOrder extends Model
         'user_id',
         'agency_id',
         'operator_id',
-        'status_id',
+        'status',
         'cart_url',
         'quote_amount',
         'quote_currency',
@@ -44,9 +45,16 @@ class PurchaseOrder extends Model
 
     public static function generateReferenceCode(): string
     {
-        $last = static::query()->orderByDesc('id')->value('id') ?? 0;
-
-        return 'PO-'.str_pad($last + 1, 4, '0', STR_PAD_LEFT);
+        return ConfigurableReferenceCode::allocate(
+            'purchase_order_reference_format',
+            '{prefix}-{seq}',
+            'purchase_order_reference_prefix',
+            'PO',
+            'purchase_order_reference_seq_pad',
+            4,
+            'purchase_order_next_seq',
+            static::query(),
+        );
     }
 
     public function user(): BelongsTo
@@ -62,11 +70,6 @@ class PurchaseOrder extends Model
     public function operator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'operator_id');
-    }
-
-    public function status(): BelongsTo
-    {
-        return $this->belongsTo(Status::class);
     }
 
     public function items(): HasMany

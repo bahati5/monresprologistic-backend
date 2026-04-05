@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ShipmentStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,18 +11,15 @@ class Shipment extends Model
 {
     protected $fillable = [
         'public_tracking',
-        'sender_id',
-        'sender_client_id',
+        'invoice_document_number',
         'sender_profile_id',
-        'recipient_id',
-        'delivery_recipient_id',
         'recipient_profile_id',
+        'creator_user_id',
         'agency_id',
         'origin_country_id',
         'dest_country_id',
-        'status_id',
-        'service_type_id',
-        'consolidation_id',
+        'status',
+        'regroupement_id',
         'master_shipment_id',
         'pre_alert_id',
         'assigned_driver_id',
@@ -31,6 +29,7 @@ class Shipment extends Model
         'width_cm',
         'height_cm',
         'declared_value',
+        'company_coverage_amount',
         'declared_currency',
         'service_options',
         'pricing_snapshot',
@@ -47,31 +46,14 @@ class Shipment extends Model
     protected function casts(): array
     {
         return [
+            'status' => ShipmentStatus::class,
             'service_options' => 'array',
             'pricing_snapshot' => 'array',
             'paid_at' => 'datetime',
         ];
     }
 
-    public function status(): BelongsTo
-    {
-        return $this->belongsTo(Status::class);
-    }
-
-    public function logs(): HasMany
-    {
-        return $this->hasMany(ShipmentLog::class);
-    }
-
-    public function sender(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'sender_id');
-    }
-
-    public function senderClient(): BelongsTo
-    {
-        return $this->belongsTo(CrmClient::class, 'sender_client_id');
-    }
+    // ─── Relationships ───────────────────────────────
 
     public function senderProfile(): BelongsTo
     {
@@ -83,20 +65,9 @@ class Shipment extends Model
         return $this->belongsTo(Profile::class, 'recipient_profile_id');
     }
 
-    /**
-     * Utilisateur expéditeur (si compte portail). Peut être null.
-     */
-    public function recipient(): BelongsTo
+    public function creator(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'recipient_id');
-    }
-
-    /**
-     * Fiche destinataire (carnet d’adresses).
-     */
-    public function deliveryRecipient(): BelongsTo
-    {
-        return $this->belongsTo(Recipient::class, 'delivery_recipient_id');
+        return $this->belongsTo(User::class, 'creator_user_id');
     }
 
     public function agency(): BelongsTo
@@ -104,14 +75,19 @@ class Shipment extends Model
         return $this->belongsTo(Agency::class);
     }
 
-    public function serviceType(): BelongsTo
+    public function originCountry(): BelongsTo
     {
-        return $this->belongsTo(ServiceType::class);
+        return $this->belongsTo(Country::class, 'origin_country_id');
     }
 
-    public function consolidation(): BelongsTo
+    public function destCountry(): BelongsTo
     {
-        return $this->belongsTo(Consolidation::class);
+        return $this->belongsTo(Country::class, 'dest_country_id');
+    }
+
+    public function regroupement(): BelongsTo
+    {
+        return $this->belongsTo(Regroupement::class, 'regroupement_id');
     }
 
     public function preAlert(): BelongsTo
@@ -134,8 +110,18 @@ class Shipment extends Model
         return $this->hasMany(ShipmentItem::class);
     }
 
+    public function logs(): HasMany
+    {
+        return $this->hasMany(ShipmentLog::class);
+    }
+
     public function invoices(): HasMany
     {
         return $this->hasMany(Invoice::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(ShipmentPayment::class)->orderByDesc('created_at');
     }
 }

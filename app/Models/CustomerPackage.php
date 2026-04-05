@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\ShipmentStatus;
+use App\Support\ConfigurableReferenceCode;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -13,7 +15,7 @@ class CustomerPackage extends Model
         'agency_id',
         'locker_id',
         'pre_alert_id',
-        'status_id',
+        'status',
         'description',
         'merchant_name',
         'weight_kg',
@@ -33,6 +35,7 @@ class CustomerPackage extends Model
     protected function casts(): array
     {
         return [
+            'status' => ShipmentStatus::class,
             'weight_kg' => 'decimal:3',
             'length_cm' => 'decimal:2',
             'width_cm' => 'decimal:2',
@@ -46,9 +49,16 @@ class CustomerPackage extends Model
 
     public static function generateReferenceCode(): string
     {
-        $last = static::query()->orderByDesc('id')->value('id') ?? 0;
-
-        return 'PKG-'.str_pad($last + 1, 4, '0', STR_PAD_LEFT);
+        return ConfigurableReferenceCode::allocate(
+            'customer_package_reference_format',
+            '{prefix}-{seq}',
+            'customer_package_reference_prefix',
+            'PKG',
+            'customer_package_reference_seq_pad',
+            4,
+            'customer_package_next_seq',
+            static::query(),
+        );
     }
 
     public function user(): BelongsTo
@@ -69,11 +79,6 @@ class CustomerPackage extends Model
     public function preAlert(): BelongsTo
     {
         return $this->belongsTo(PreAlert::class);
-    }
-
-    public function status(): BelongsTo
-    {
-        return $this->belongsTo(Status::class);
     }
 
     public function receivedByUser(): BelongsTo

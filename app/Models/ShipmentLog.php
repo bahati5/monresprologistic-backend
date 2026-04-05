@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ShipmentStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -12,7 +13,7 @@ class ShipmentLog extends Model
     protected $fillable = [
         'shipment_id',
         'user_id',
-        'status_id',
+        'status',
         'title',
         'description',
         'meta',
@@ -23,6 +24,7 @@ class ShipmentLog extends Model
     protected function casts(): array
     {
         return [
+            'status' => ShipmentStatus::class,
             'meta' => 'array',
             'created_at' => 'datetime',
         ];
@@ -36,10 +38,5 @@ class ShipmentLog extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
-    }
-
-    public function status(): BelongsTo
-    {
-        return $this->belongsTo(Status::class);
     }
 }

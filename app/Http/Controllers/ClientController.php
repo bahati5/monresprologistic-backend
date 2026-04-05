@@ -10,8 +10,10 @@ use App\Models\Profile;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Support\LockerNumberGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -29,7 +31,7 @@ class ClientController extends Controller
         $query = Profile::query()
             ->whereNotNull('agency_id')
             ->with(['agency', 'user', 'city', 'state', 'country'])
-            ->withCount(['savedByUsers as address_book_count']);
+            ->withCount(['savedByProfiles as address_book_count']);
 
         if (! $user->canAccessAllAgencies()) {
             $query->where('agency_id', $user->agency_id);
@@ -78,7 +80,6 @@ class ClientController extends Controller
 
         $shipments = Shipment::query()
             ->where('sender_profile_id', $client->id)
-            ->with(['status'])
             ->latest()
             ->take(20)
             ->get();
@@ -178,6 +179,8 @@ class ClientController extends Controller
                     'city_id' => $data['city_id'],
                     'agency_id' => $agencyId,
                     'is_active' => true,
+                    'is_client' => true,
+                    'is_staff' => false,
                 ]);
             } else {
                 $profile = Profile::create([
@@ -194,11 +197,13 @@ class ClientController extends Controller
                     'city_id' => $data['city_id'],
                     'agency_id' => $agencyId,
                     'is_active' => true,
+                    'is_client' => true,
+                    'is_staff' => false,
                 ]);
             }
 
             if ($createPortal && ! $profile->user) {
-                $fullName = trim($data['first_name'] . ' ' . $data['last_name']);
+                $fullName = trim($data['first_name'].' '.$data['last_name']);
                 $portalUser = User::create([
                     'profile_id' => $profile->id,
                     'name' => $fullName,
@@ -214,7 +219,7 @@ class ClientController extends Controller
                 $portalUser->assignRole('client');
             }
 
-            $lockerNumber = $this->generateLockerNumber();
+            $lockerNumber = LockerNumberGenerator::generate();
 
             Locker::create([
                 'profile_id' => $profile->id,
@@ -237,7 +242,7 @@ class ClientController extends Controller
         $suffix = $createPortal ? ' (compte portail créé)' : ' (sans compte portail)';
 
         return response()->json([
-            'message' => 'Fiche client créée avec casier ' . $lockerCode . $suffix,
+            'message' => 'Fiche client créée avec casier '.$lockerCode.$suffix,
             'client' => new ProfileResource($profile),
         ], 201);
     }
@@ -284,7 +289,7 @@ class ClientController extends Controller
 
             if ($client->user) {
                 $client->user->update([
-                    'name' => trim($data['first_name'] . ' ' . $data['last_name']),
+                    'name' => trim($data['first_name'].' '.$data['last_name']),
                     'first_name' => $data['first_name'],
                     'last_name' => $data['last_name'],
                     'email' => $data['email'],
@@ -372,32 +377,12 @@ class ClientController extends Controller
         }
     }
 
-    private function getAgencies(User $user): \Illuminate\Support\Collection
+    private function getAgencies(User $user): Collection
     {
         if ($user->canAccessAllAgencies()) {
             return Agency::where('is_active', true)->get(['id', 'name']);
         }
 
         return Agency::where('id', $user->agency_id)->get(['id', 'name']);
-    }
-
-    private function generateLockerNumber(): string
-    {
-        $prefix = Setting::getValue('locker_prefix', 'MRP');
-        $digits = (int) Setting::getValue('locker_digits', '4');
-        $mode = Setting::getValue('locker_mode', 'random');
-
-        if ($mode === 'sequential') {
-            $last = Locker::query()->orderByDesc('id')->value('code');
-            $lastNum = $last ? (int) preg_replace('/\D/', '', $last) : 0;
-
-            return $prefix . '-' . str_pad($lastNum + 1, $digits, '0', STR_PAD_LEFT);
-        }
-
-        do {
-            $code = $prefix . '-' . str_pad(random_int(0, pow(10, $digits) - 1), $digits, '0', STR_PAD_LEFT);
-        } while (Locker::where('code', $code)->exists());
-
-        return $code;
     }
 }

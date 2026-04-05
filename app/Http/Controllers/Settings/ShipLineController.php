@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Settings;
 
 use App\Http\Controllers\Controller;
-use App\Models\DeliveryTime;
+use App\Models\Country;
 use App\Models\Setting;
 use App\Models\ShipLine;
 use App\Models\ShipLineCountry;
@@ -11,8 +11,6 @@ use App\Models\ShipLineRate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 
 class ShipLineController extends Controller
 {
@@ -20,8 +18,8 @@ class ShipLineController extends Controller
     {
         $lines = ShipLine::query()
             ->with([
-                'countryScopes.country:id,name,code,iso2',
-                'rates' => fn ($q) => $q->orderBy('id')->with(['shippingMode:id,name', 'deliveryTime:id,label,shipping_mode_id']),
+                'countryScopes.country:id,name,code,iso2,emoji',
+                'rates' => fn ($q) => $q->orderBy('id')->with(['shippingMode:id,name,default_pricing_type']),
             ])
             ->orderBy('name')
             ->get();
@@ -44,8 +42,8 @@ class ShipLineController extends Controller
         $lines = ShipLine::query()
             ->where('is_active', true)
             ->with([
-                'countryScopes.country:id,name,code,iso2',
-                'rates' => fn ($q) => $q->where('is_active', true)->with(['shippingMode:id,name', 'deliveryTime:id,label,shipping_mode_id']),
+                'countryScopes.country:id,name,code,iso2,emoji',
+                'rates' => fn ($q) => $q->where('is_active', true)->with(['shippingMode:id,name,default_pricing_type,delivery_options']),
             ])
             ->orderBy('name')
             ->get()
@@ -60,6 +58,11 @@ class ShipLineController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $this->validatedPayload($request);
+        $data['name'] = $this->resolveShipLineName(
+            $data['origin_country_ids'],
+            $data['dest_country_ids'],
+            trim((string) ($data['name'] ?? '')),
+        );
 
         $line = DB::transaction(function () use ($data) {
             $line = ShipLine::create([
@@ -70,7 +73,7 @@ class ShipLineController extends Controller
             $this->syncCountries($line, $data['origin_country_ids'], $data['dest_country_ids']);
             $this->syncRates($line, $data['rates']);
 
-            return $line->fresh(['countryScopes.country', 'rates.shippingMode', 'rates.deliveryTime']);
+            return $line->fresh(['countryScopes.country', 'rates.shippingMode']);
         });
 
         return response()->json([
@@ -93,12 +96,10 @@ class ShipLineController extends Controller
             'dest_country_ids.*' => ['integer', 'exists:countries,id'],
             'rates' => ['required', 'array', 'min:1'],
             'rates.*.shipping_mode_id' => ['required', 'integer', 'exists:shipping_modes,id'],
-            'rates.*.delivery_time_id' => ['nullable', 'integer', 'exists:delivery_times,id'],
             'rates.*.unit_price' => ['required', 'numeric', 'min:0'],
             'rates.*.currency' => ['nullable', 'string', 'max:8'],
-            'rates.*.pricing_type' => ['required', 'string', Rule::in(['per_kg', 'per_volume', 'flat'])],
             'rates.*.is_active' => ['boolean'],
-            'rates.*.volumetric_divisor' => ['nullable', 'integer', 'min:1', 'max:99999'],
+            'rates.*.delivery_label_override' => ['nullable', 'string', 'max:500'],
         ]);
 
         $lineIds = array_values(array_unique(array_map('intval', $data['ship_line_ids'])));
@@ -110,7 +111,7 @@ class ShipLineController extends Controller
                 $this->mergeCountriesIntoLine($line, $data['origin_country_ids'], $data['dest_country_ids']);
                 $this->appendOrUpsertRates($line, $data['rates']);
             });
-            $line->load(['countryScopes.country', 'rates.shippingMode', 'rates.deliveryTime']);
+            $line->load(['countryScopes.country', 'rates.shippingMode']);
             $serialized[] = $this->serializeShipLine($line);
         }
 
@@ -128,6 +129,16 @@ class ShipLineController extends Controller
     {
         $data = $this->validatedPayload($request);
 
+        $preferred = trim((string) ($data['name'] ?? ''));
+        if ($preferred === '') {
+            $preferred = (string) ($shipLine->name ?? '');
+        }
+        $data['name'] = $this->resolveShipLineName(
+            $data['origin_country_ids'],
+            $data['dest_country_ids'],
+            $preferred,
+        );
+
         DB::transaction(function () use ($shipLine, $data) {
             $shipLine->update([
                 'name' => $data['name'],
@@ -138,7 +149,7 @@ class ShipLineController extends Controller
             $this->syncRates($shipLine, $data['rates']);
         });
 
-        $shipLine->load(['countryScopes.country', 'rates.shippingMode', 'rates.deliveryTime']);
+        $shipLine->load(['countryScopes.country', 'rates.shippingMode']);
 
         return response()->json([
             'message' => 'Ligne d\'expédition mise à jour.',
@@ -154,12 +165,52 @@ class ShipLineController extends Controller
     }
 
     /**
+     * @param  array<int>  $originIds
+     * @param  array<int>  $destIds
+     */
+    protected function resolveShipLineName(array $originIds, array $destIds, string $preferred = ''): string
+    {
+        if ($preferred !== '') {
+            return mb_substr($preferred, 0, 255);
+        }
+
+        $format = function (array $ids): string {
+            $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn ($id) => $id > 0)));
+            if ($ids === []) {
+                return '';
+            }
+
+            return Country::query()
+                ->whereIn('id', $ids)
+                ->orderBy('name')
+                ->get(['name', 'iso2', 'code'])
+                ->map(function (Country $c) {
+                    $t = $c->iso2 ?: $c->code;
+                    if (is_string($t) && trim($t) !== '') {
+                        return mb_strtoupper(trim($t));
+                    }
+
+                    return mb_substr((string) $c->name, 0, 12);
+                })
+                ->filter()
+                ->take(6)
+                ->implode(', ');
+        };
+
+        $left = $format($originIds);
+        $right = $format($destIds);
+        $base = trim($left.' → '.$right);
+
+        return $base !== '' ? mb_substr($base, 0, 255) : 'Ligne';
+    }
+
+    /**
      * @return array<string, mixed>
      */
     protected function validatedPayload(Request $request): array
     {
         return $request->validate([
-            'name' => ['required', 'string', 'max:255'],
+            'name' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
             'is_active' => ['boolean'],
             'origin_country_ids' => ['required', 'array', 'min:1'],
@@ -168,12 +219,10 @@ class ShipLineController extends Controller
             'dest_country_ids.*' => ['integer', 'exists:countries,id'],
             'rates' => ['required', 'array', 'min:1'],
             'rates.*.shipping_mode_id' => ['required', 'integer', 'exists:shipping_modes,id'],
-            'rates.*.delivery_time_id' => ['nullable', 'integer', 'exists:delivery_times,id'],
             'rates.*.unit_price' => ['required', 'numeric', 'min:0'],
             'rates.*.currency' => ['nullable', 'string', 'max:8'],
-            'rates.*.pricing_type' => ['required', 'string', Rule::in(['per_kg', 'per_volume', 'flat'])],
             'rates.*.is_active' => ['boolean'],
-            'rates.*.volumetric_divisor' => ['nullable', 'integer', 'min:1', 'max:99999'],
+            'rates.*.delivery_label_override' => ['nullable', 'string', 'max:500'],
         ]);
     }
 
@@ -187,29 +236,15 @@ class ShipLineController extends Controller
 
         foreach ($rates as $row) {
             $modeId = (int) $row['shipping_mode_id'];
-            $dtId = isset($row['delivery_time_id']) && $row['delivery_time_id'] !== '' && $row['delivery_time_id'] !== null
-                ? (int) $row['delivery_time_id'] : null;
-            if ($dtId !== null && $dtId > 0) {
-                $ok = DeliveryTime::query()->whereKey($dtId)->where('shipping_mode_id', $modeId)->exists();
-                if (! $ok) {
-                    throw ValidationException::withMessages([
-                        'rates' => ['Le délai ne correspond pas au mode d\'expédition.'],
-                    ]);
-                }
-            } else {
-                $dtId = null;
-            }
+            $ov = isset($row['delivery_label_override']) ? trim((string) $row['delivery_label_override']) : '';
 
             ShipLineRate::query()->create([
                 'ship_line_id' => $line->id,
                 'shipping_mode_id' => $modeId,
-                'delivery_time_id' => $dtId,
+                'delivery_label_override' => $ov !== '' ? $ov : null,
                 'unit_price' => (float) $row['unit_price'],
                 'currency' => $defaultCurrency,
-                'pricing_type' => (string) $row['pricing_type'],
                 'is_active' => (bool) ($row['is_active'] ?? true),
-                'volumetric_divisor' => isset($row['volumetric_divisor']) && $row['volumetric_divisor'] !== '' && $row['volumetric_divisor'] !== null
-                    ? (int) $row['volumetric_divisor'] : null,
             ]);
         }
     }
@@ -281,21 +316,7 @@ class ShipLineController extends Controller
 
         foreach ($rates as $row) {
             $modeId = (int) $row['shipping_mode_id'];
-            $dtId = isset($row['delivery_time_id']) && $row['delivery_time_id'] !== '' && $row['delivery_time_id'] !== null
-                ? (int) $row['delivery_time_id'] : null;
-            if ($dtId !== null && $dtId > 0) {
-                $ok = DeliveryTime::query()->whereKey($dtId)->where('shipping_mode_id', $modeId)->exists();
-                if (! $ok) {
-                    throw ValidationException::withMessages([
-                        'rates' => ['Le délai ne correspond pas au mode d\'expédition.'],
-                    ]);
-                }
-            } else {
-                $dtId = null;
-            }
-
-            $vol = isset($row['volumetric_divisor']) && $row['volumetric_divisor'] !== '' && $row['volumetric_divisor'] !== null
-                ? (int) $row['volumetric_divisor'] : null;
+            $ov = isset($row['delivery_label_override']) ? trim((string) $row['delivery_label_override']) : '';
 
             ShipLineRate::query()->updateOrCreate(
                 [
@@ -303,12 +324,10 @@ class ShipLineController extends Controller
                     'shipping_mode_id' => $modeId,
                 ],
                 [
-                    'delivery_time_id' => $dtId,
+                    'delivery_label_override' => $ov !== '' ? $ov : null,
                     'unit_price' => (float) $row['unit_price'],
                     'currency' => $defaultCurrency,
-                    'pricing_type' => (string) $row['pricing_type'],
                     'is_active' => (bool) ($row['is_active'] ?? true),
-                    'volumetric_divisor' => $vol !== null && $vol >= 1 ? $vol : null,
                 ],
             );
         }
@@ -336,27 +355,40 @@ class ShipLineController extends Controller
         $origins = $scopes->where('scope', 'origin')->map(fn ($r) => $r->country)->filter()->values();
         $dests = $scopes->where('scope', 'destination')->map(fn ($r) => $r->country)->filter()->values();
 
-        $rates = $line->relationLoaded('rates') ? $line->rates : $line->rates()->with(['shippingMode', 'deliveryTime'])->get();
+        $rates = $line->relationLoaded('rates') ? $line->rates : $line->rates()->with(['shippingMode'])->get();
 
         return [
             'id' => $line->id,
             'name' => $line->name,
             'description' => $line->description,
             'is_active' => (bool) $line->is_active,
-            'origin_countries' => $origins->map(fn ($c) => ['id' => $c->id, 'name' => $c->name, 'code' => $c->code, 'iso2' => $c->iso2])->all(),
-            'destination_countries' => $dests->map(fn ($c) => ['id' => $c->id, 'name' => $c->name, 'code' => $c->code, 'iso2' => $c->iso2])->all(),
+            'origin_countries' => $origins->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'code' => $c->code,
+                'iso2' => $c->iso2,
+                'emoji' => $c->emoji,
+            ])->all(),
+            'destination_countries' => $dests->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'code' => $c->code,
+                'iso2' => $c->iso2,
+                'emoji' => $c->emoji,
+            ])->all(),
             'rates' => $rates->map(fn (ShipLineRate $r) => [
                 'id' => $r->id,
                 'ship_line_id' => $r->ship_line_id,
                 'shipping_mode_id' => $r->shipping_mode_id,
-                'delivery_time_id' => $r->delivery_time_id,
+                'delivery_label_override' => $r->delivery_label_override,
                 'unit_price' => (float) $r->unit_price,
                 'currency' => $r->currency,
-                'pricing_type' => $r->pricing_type,
                 'is_active' => (bool) $r->is_active,
-                'volumetric_divisor' => $r->volumetric_divisor,
-                'shipping_mode' => $r->shippingMode ? ['id' => $r->shippingMode->id, 'name' => $r->shippingMode->name] : null,
-                'delivery_time' => $r->deliveryTime ? ['id' => $r->deliveryTime->id, 'label' => $r->deliveryTime->label] : null,
+                'shipping_mode' => $r->shippingMode ? [
+                    'id' => $r->shippingMode->id,
+                    'name' => $r->shippingMode->name,
+                    'delivery_options' => $r->shippingMode->delivery_options,
+                ] : null,
             ])->values()->all(),
         ];
     }

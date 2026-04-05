@@ -17,7 +17,7 @@ class PricingEngine
         protected ExpressionLanguage $expressions = new ExpressionLanguage,
     ) {}
 
-    public static function forContext(?int $agencyId = null, ?int $zoneId = null, ?int $serviceTypeId = null): self
+    public static function forContext(?int $agencyId = null, ?int $zoneId = null): self
     {
         $query = PricingRule::query()->where('is_active', true)->orderByDesc('priority');
 
@@ -30,12 +30,6 @@ class PricingEngine
         if ($zoneId) {
             $query->where(function ($q) use ($zoneId) {
                 $q->whereNull('zone_id')->orWhere('zone_id', $zoneId);
-            });
-        }
-
-        if ($serviceTypeId) {
-            $query->where(function ($q) use ($serviceTypeId) {
-                $q->whereNull('service_type_id')->orWhere('service_type_id', $serviceTypeId);
             });
         }
 

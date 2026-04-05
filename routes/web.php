@@ -4,6 +4,7 @@ use App\Http\Controllers\NewsletterController;
 use App\Http\Controllers\PdfController;
 use App\Http\Controllers\TrackingController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 /*
 |--------------------------------------------------------------------------
@@ -15,6 +16,23 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/', fn () => response()->json(['app' => config('app.name'), 'status' => 'ok']));
+
+/*
+| Fallback si `php artisan storage:link` n’a pas été exécuté (souvent sous Windows) :
+| sert les fichiers du disque public depuis storage/app/public.
+| En prod, le serveur web peut continuer à servir public/storage en statique en priorité.
+*/
+Route::get('/storage/{path}', function (string $path) {
+    $path = str_replace('\\', '/', $path);
+    if (str_contains($path, '..')) {
+        abort(404);
+    }
+    if ($path === '' || ! Storage::disk('public')->exists($path)) {
+        abort(404);
+    }
+
+    return Storage::disk('public')->response($path);
+})->where('path', '.*');
 
 // Public tracking page
 Route::get('/track/{publicTracking}', [TrackingController::class, 'show'])->name('tracking.show');

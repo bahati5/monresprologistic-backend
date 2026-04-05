@@ -9,6 +9,7 @@ use App\Models\Locker;
 use App\Models\Profile;
 use App\Models\Setting;
 use App\Models\User;
+use App\Support\LockerNumberGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -59,6 +60,8 @@ class AuthController extends Controller
                     'email' => $validated['email'],
                     'phone' => $validated['phone'],
                     'is_active' => true,
+                    'is_client' => true,
+                    'is_staff' => false,
                 ]);
             } else {
                 $profile->update([
@@ -69,11 +72,11 @@ class AuthController extends Controller
                 ]);
             }
 
-            $lockerNumber = $this->generateLockerNumber();
+            $lockerNumber = LockerNumberGenerator::generate();
 
             $newUser = User::create([
                 'profile_id' => $profile->id,
-                'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
+                'name' => trim($validated['first_name'].' '.$validated['last_name']),
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'],
                 'email' => $validated['email'],
@@ -139,25 +142,5 @@ class AuthController extends Controller
             'token' => $token,
             'user' => new UserResource($user->load('profile')),
         ]);
-    }
-
-    private function generateLockerNumber(): string
-    {
-        $prefix = Setting::getValue('locker_prefix', 'MRP');
-        $digits = (int) Setting::getValue('locker_digits', '4');
-        $mode = Setting::getValue('locker_mode', 'random');
-
-        if ($mode === 'sequential') {
-            $last = Locker::query()->orderByDesc('id')->value('code');
-            $lastNum = $last ? (int) preg_replace('/\D/', '', $last) : 0;
-
-            return $prefix . '-' . str_pad($lastNum + 1, $digits, '0', STR_PAD_LEFT);
-        }
-
-        do {
-            $code = $prefix . '-' . str_pad(random_int(0, pow(10, $digits) - 1), $digits, '0', STR_PAD_LEFT);
-        } while (Locker::where('code', $code)->exists());
-
-        return $code;
     }
 }

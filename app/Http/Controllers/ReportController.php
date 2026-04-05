@@ -2,18 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\PickupStatus;
+use App\Enums\ShipmentStatus;
 use App\Models\Agency;
-use App\Models\Consolidation;
-use App\Models\CrmClient;
 use App\Models\Invoice;
 use App\Models\PaymentProof;
 use App\Models\Pickup;
 use App\Models\PreAlert;
+use App\Models\Profile;
+use App\Models\Regroupement;
 use App\Models\Shipment;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
@@ -45,16 +48,14 @@ class ReportController extends Controller
     public function shipments(Request $request): JsonResponse
     {
         $user = $request->user();
-        $query = Shipment::query()->with(['status', 'sender', 'recipient', 'agency']);
-        $this->scopeShipmentsFor($query, $user);
+        $query = Shipment::query()->with(['senderProfile', 'recipientProfile', 'agency']);
+        $this->scopeShipmentsForUser($query, $user);
 
-        $this->applyFilters($query, $request, ['agency_id', 'status_id']);
+        $this->applyFilters($query, $request, ['agency_id', 'status']);
         $this->applyDateRange($query, $request);
         if ($request->filled('client_id')) {
             $cid = (int) $request->input('client_id');
-            $query->where(function ($q) use ($cid) {
-                $q->where('sender_id', $cid)->orWhere('sender_client_id', $cid);
-            });
+            $query->where('sender_profile_id', $cid);
         }
         $this->applyUserFilter($query, $request, 'driver_id', 'driver_id');
 
@@ -69,19 +70,19 @@ class ReportController extends Controller
         return response()->json([
             'shipments' => $shipments,
             'totals' => $totals,
-            'filters' => $request->only(['agency_id', 'status_id', 'client_id', 'driver_id', 'employee_id', 'date_from', 'date_to']),
+            'filters' => $request->only(['agency_id', 'status', 'client_id', 'driver_id', 'employee_id', 'date_from', 'date_to']),
             'agencies' => $this->getAgencies($user),
-            'statuses' => \App\Models\Status::orderBy('sort_order')->get(['id', 'code', 'name', 'color_hex']),
+            'statuses' => $this->shipmentStatusOptions(),
         ]);
     }
 
     public function pickups(Request $request): JsonResponse
     {
         $user = $request->user();
-        $query = Pickup::query()->with(['status', 'client', 'agency', 'driver']);
+        $query = Pickup::query()->with(['client', 'agency', 'driver']);
         $this->scopeByAgency($query, $user);
 
-        $this->applyFilters($query, $request, ['agency_id', 'status_id']);
+        $this->applyFilters($query, $request, ['agency_id', 'status']);
         $this->applyDateRange($query, $request);
         if ($request->filled('driver_id')) {
             $query->where('assigned_driver_id', $request->input('driver_id'));
@@ -97,48 +98,49 @@ class ReportController extends Controller
         return response()->json([
             'pickups' => $pickups,
             'totals' => $totals,
-            'filters' => $request->only(['agency_id', 'status_id', 'driver_id', 'date_from', 'date_to']),
+            'filters' => $request->only(['agency_id', 'status', 'driver_id', 'date_from', 'date_to']),
             'agencies' => $this->getAgencies($user),
-            'statuses' => \App\Models\Status::orderBy('sort_order')->get(['id', 'code', 'name', 'color_hex']),
+            'statuses' => $this->pickupStatusOptions(),
         ]);
     }
 
-    public function consolidations(Request $request): JsonResponse
+    public function regroupements(Request $request): JsonResponse
     {
         $user = $request->user();
-        $query = Consolidation::query()->with(['status', 'user', 'agency']);
+        $query = Regroupement::query()->with(['agency']);
         $this->scopeByAgency($query, $user);
 
-        $this->applyFilters($query, $request, ['agency_id', 'status_id']);
+        $this->applyFilters($query, $request, ['agency_id', 'status']);
         $this->applyDateRange($query, $request);
 
-        $consolidations = $query->latest()->paginate(50)->withQueryString();
+        $regroupements = $query->latest()->paginate(50)->withQueryString();
 
+        $ids = (clone $query)->pluck('id')->all();
         $totals = [
             'count' => (clone $query)->count(),
-            'total_weight' => (clone $query)->sum('total_weight_kg'),
+            'total_weight' => $ids === [] ? 0 : Shipment::query()->whereIn('regroupement_id', $ids)->sum('weight_kg'),
         ];
 
         return response()->json([
-            'consolidations' => $consolidations,
+            'regroupements' => $regroupements,
             'totals' => $totals,
-            'filters' => $request->only(['agency_id', 'status_id', 'date_from', 'date_to']),
+            'filters' => $request->only(['agency_id', 'status', 'date_from', 'date_to']),
             'agencies' => $this->getAgencies($user),
-            'statuses' => \App\Models\Status::orderBy('sort_order')->get(['id', 'code', 'name', 'color_hex']),
+            'statuses' => $this->shipmentStatusOptions(),
         ]);
     }
 
     public function packages(Request $request): JsonResponse
     {
         $user = $request->user();
-        $query = PreAlert::query()->with(['user', 'status', 'locker']);
+        $query = PreAlert::query()->with(['user', 'locker']);
 
         if (! $user->canAccessAllAgencies()) {
             $query->whereHas('user', fn ($q) => $q->where('agency_id', $user->agency_id));
         }
 
         $this->applyDateRange($query, $request);
-        $this->applyFilters($query, $request, ['status_id']);
+        $this->applyFilters($query, $request, ['status']);
 
         $packages = $query->latest()->paginate(50)->withQueryString();
 
@@ -149,9 +151,9 @@ class ReportController extends Controller
         return response()->json([
             'packages' => $packages,
             'totals' => $totals,
-            'filters' => $request->only(['agency_id', 'status_id', 'date_from', 'date_to']),
+            'filters' => $request->only(['agency_id', 'status', 'date_from', 'date_to']),
             'agencies' => $this->getAgencies($user),
-            'statuses' => \App\Models\Status::orderBy('sort_order')->get(['id', 'code', 'name', 'color_hex']),
+            'statuses' => $this->shipmentStatusOptions(),
         ]);
     }
 
@@ -192,16 +194,16 @@ class ReportController extends Controller
     public function exportShipments(Request $request): StreamedResponse
     {
         $user = $request->user();
-        $query = Shipment::query()->with(['status', 'sender', 'recipient', 'agency']);
-        $this->scopeShipmentsFor($query, $user);
-        $this->applyFilters($query, $request, ['agency_id', 'status_id']);
+        $query = Shipment::query()->with(['senderProfile', 'recipientProfile', 'agency']);
+        $this->scopeShipmentsForUser($query, $user);
+        $this->applyFilters($query, $request, ['agency_id', 'status']);
         $this->applyDateRange($query, $request);
 
         return $this->streamCsv('rapport-expeditions.csv', $query, function ($s) {
             return [
                 $s->public_tracking,
-                $s->sender?->name ?? '',
-                $s->recipient?->name ?? '',
+                $s->senderProfile?->full_name ?? '',
+                $s->recipientProfile?->full_name ?? '',
                 $s->status?->code ?? '',
                 $s->agency?->name ?? '',
                 $s->weight_kg,
@@ -215,9 +217,9 @@ class ReportController extends Controller
     public function exportPickups(Request $request): StreamedResponse
     {
         $user = $request->user();
-        $query = Pickup::query()->with(['status', 'client', 'agency', 'driver']);
+        $query = Pickup::query()->with(['client', 'agency', 'driver']);
         $this->scopeByAgency($query, $user);
-        $this->applyFilters($query, $request, ['agency_id', 'status_id']);
+        $this->applyFilters($query, $request, ['agency_id', 'status']);
         $this->applyDateRange($query, $request);
 
         return $this->streamCsv('rapport-pickups.csv', $query, function ($p) {
@@ -225,7 +227,7 @@ class ReportController extends Controller
                 $p->id,
                 $p->client?->name ?? '',
                 $p->driver?->name ?? '',
-                $p->status?->code ?? '',
+                $p->status instanceof PickupStatus ? $p->status->value : (string) ($p->status ?? ''),
                 $p->agency?->name ?? '',
                 $p->address_text ?? '',
                 $p->completed_at?->format('Y-m-d H:i') ?? '',
@@ -302,7 +304,7 @@ class ReportController extends Controller
     private function buildShipmentsSummary(User $user, Carbon $from, Carbon $to, Carbon $pFrom, Carbon $pTo): array
     {
         $q = Shipment::query();
-        $this->scopeShipmentsFor($q, $user);
+        $this->scopeShipmentsForUser($q, $user);
         $cur = (clone $q)->whereBetween('created_at', [$from, $to])->count();
         $prev = (clone $q)->whereBetween('created_at', [$pFrom, $pTo])->count();
         $weightCur = (clone $q)->whereBetween('created_at', [$from, $to])->sum('weight_kg');
@@ -386,7 +388,7 @@ class ReportController extends Controller
      */
     private function buildClientsSummary(User $user, Carbon $from, Carbon $to, Carbon $pFrom, Carbon $pTo): array
     {
-        $q = CrmClient::query();
+        $q = Profile::query()->whereNotNull('agency_id');
         if (! $user->canAccessAllAgencies()) {
             $q->where('agency_id', $user->agency_id);
         }
@@ -410,6 +412,32 @@ class ReportController extends Controller
     }
 
     // --- Helpers ---
+
+    /**
+     * @return Collection<int, array{id: int, code: string, name: string}>
+     */
+    private function shipmentStatusOptions(): Collection
+    {
+        return collect(ShipmentStatus::cases())->map(fn (ShipmentStatus $s) => [
+            'id' => crc32($s->value) % 1_000_000,
+            'code' => $s->value,
+            'name' => $s->label(),
+            'color_hex' => null,
+        ]);
+    }
+
+    /**
+     * @return Collection<int, array{id: int, code: string, name: string}>
+     */
+    private function pickupStatusOptions(): Collection
+    {
+        return collect(PickupStatus::cases())->map(fn (PickupStatus $s) => [
+            'id' => crc32($s->value) % 1_000_000,
+            'code' => $s->value,
+            'name' => $s->label(),
+            'color_hex' => null,
+        ]);
+    }
 
     private function applyFilters($query, Request $request, array $columns): void
     {
@@ -437,7 +465,7 @@ class ReportController extends Controller
         }
     }
 
-    private function getAgencies(User $user): \Illuminate\Support\Collection
+    private function getAgencies(User $user): Collection
     {
         if ($user->canAccessAllAgencies()) {
             return Agency::where('is_active', true)->get(['id', 'name']);

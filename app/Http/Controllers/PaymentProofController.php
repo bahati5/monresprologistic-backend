@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ShipmentStatus;
 use App\Models\Invoice;
 use App\Models\LedgerEntry;
 use App\Models\PaymentMethod;
 use App\Models\PaymentProof;
-use App\Models\Status;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -60,9 +60,8 @@ class PaymentProofController extends Controller
             'status' => 'pending',
         ]);
 
-        $reviewStatus = Status::query()->where('code', 'financial_review')->first();
-        if ($reviewStatus && $invoice->shipment) {
-            $invoice->shipment->update(['status_id' => $reviewStatus->id]);
+        if ($invoice->shipment) {
+            $invoice->shipment->update(['status' => ShipmentStatus::ReceivedAtHub]);
         }
 
         return response()->json(['message' => 'Preuve de paiement envoyée.']);
@@ -91,9 +90,8 @@ class PaymentProofController extends Controller
             'description' => 'Paiement approuvé',
         ]);
 
-        $ready = Status::query()->where('code', 'ready_delivery')->first();
-        if ($ready && $invoice->shipment) {
-            $invoice->shipment->update(['status_id' => $ready->id]);
+        if ($invoice->shipment) {
+            $invoice->shipment->update(['status' => ShipmentStatus::ReadyForDispatch]);
         }
 
         return response()->json(['message' => 'Paiement approuvé.']);

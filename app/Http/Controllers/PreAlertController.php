@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ShipmentStatus;
 use App\Models\PreAlert;
-use App\Models\Status;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -12,7 +12,7 @@ class PreAlertController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $q = PreAlert::query()->with(['user', 'locker', 'status'])->latest();
+        $q = PreAlert::query()->with(['user', 'locker'])->latest();
 
         if ($user->hasRole('client')) {
             $q->where('user_id', $user->id);
@@ -34,7 +34,7 @@ class PreAlertController extends Controller
 
     public function show(PreAlert $pre_alert): JsonResponse
     {
-        $pre_alert->load(['user', 'locker', 'status', 'media', 'customerPackage.status']);
+        $pre_alert->load(['user', 'locker', 'media', 'customerPackage']);
 
         return response()->json([
             'preAlert' => $pre_alert,
@@ -51,13 +51,11 @@ class PreAlertController extends Controller
             'description' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $status = Status::query()->where('code', 'created')->first();
-
         $preAlert = PreAlert::query()->create([
             ...$data,
             'user_id' => $user->id,
             'locker_id' => $user->locker?->id,
-            'status_id' => $status?->id,
+            'status' => ShipmentStatus::PendingDropOff,
         ]);
 
         foreach ($request->allFiles() as $key => $uploads) {

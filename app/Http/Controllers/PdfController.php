@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\DeliveryTime;
-use App\Models\Invoice;
 use App\Models\PreAlert;
+use App\Models\Regroupement;
+use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMode;
 use App\Support\QrCodeHelper;
@@ -23,6 +23,7 @@ class PdfController extends Controller
         $this->authorize('view', $shipment);
 
         $data = $this->shipmentLabelViewData($shipment, true);
+        $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
         $html = view('pdf.shipment-label', $data)->render();
 
         return response()->json([
@@ -40,6 +41,7 @@ class PdfController extends Controller
         $this->authorize('view', $shipment);
 
         $data = $this->shipmentInvoiceViewData($shipment, true);
+        $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
         $html = view('pdf.shipment-invoice', $data)->render();
 
         return response()->json([
@@ -53,7 +55,10 @@ class PdfController extends Controller
     {
         $this->authorize('view', $shipment);
 
-        $pdf = Pdf::loadView('pdf.shipment-invoice', $this->shipmentInvoiceViewData($shipment, false));
+        $data = $this->shipmentInvoiceViewData($shipment, false);
+        $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
+
+        $pdf = Pdf::loadView('pdf.shipment-invoice', $data);
         $this->enableRemoteAssets($pdf);
 
         return $pdf->stream("facture-expedition-{$shipment->public_tracking}.pdf");
@@ -63,7 +68,10 @@ class PdfController extends Controller
     {
         $this->authorize('view', $shipment);
 
-        $pdf = Pdf::loadView('pdf.shipment-label', $this->shipmentLabelViewData($shipment, false));
+        $data = $this->shipmentLabelViewData($shipment, false);
+        $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
+
+        $pdf = Pdf::loadView('pdf.shipment-label', $data);
         $this->enableRemoteAssets($pdf);
         // 10×15 cm = 283×425 pt
         $pdf->setPaper([0, 0, 283, 425]);
@@ -77,35 +85,35 @@ class PdfController extends Controller
 
         $pdf = Pdf::loadView('pdf.package-invoice', [
             'package' => $preAlert,
-            'settings' => \App\Models\Setting::all()->pluck('value', 'key'),
+            'settings' => Setting::all()->pluck('value', 'key'),
         ]);
         $this->enableRemoteAssets($pdf);
 
         return $pdf->stream("facture-colis-{$preAlert->id}.pdf");
     }
 
-    public function consolidationDocument($consolidation): Response
+    public function regroupementDocument(Regroupement $regroupement): Response
     {
-        $consolidation->load(['user', 'agency', 'shipments', 'preAlerts']);
+        $regroupement->load(['agency', 'shipments.senderProfile', 'shipments.recipientProfile']);
 
-        $pdf = Pdf::loadView('pdf.consolidation', [
-            'consolidation' => $consolidation,
-            'settings' => \App\Models\Setting::all()->pluck('value', 'key'),
+        $pdf = Pdf::loadView('pdf.regroupement', [
+            'regroupement' => $regroupement,
+            'settings' => Setting::all()->pluck('value', 'key'),
         ]);
         $this->enableRemoteAssets($pdf);
 
-        return $pdf->stream("bon-consolidation-{$consolidation->master_tracking}.pdf");
+        return $pdf->stream("bon-regroupement-{$regroupement->batch_number}.pdf");
     }
 
     public function trackingReport(Shipment $shipment): Response
     {
         $this->authorize('view', $shipment);
 
-        $shipment->load(['statusLogs', 'sender', 'recipient']);
+        $shipment->load(['logs' => fn ($q) => $q->with('user')->orderByDesc('created_at'), 'senderProfile', 'recipientProfile']);
 
         $pdf = Pdf::loadView('pdf.tracking-report', [
             'shipment' => $shipment,
-            'logs' => $shipment->statusLogs ?? collect(),
+            'logs' => $shipment->logs,
         ]);
         $this->enableRemoteAssets($pdf);
 
@@ -117,7 +125,7 @@ class PdfController extends Controller
      */
     private function shipmentInvoiceViewData(Shipment $shipment, bool $preview): array
     {
-        $shipment->load(['sender.locker', 'senderClient', 'senderProfile', 'recipient', 'deliveryRecipient', 'recipientProfile', 'agency', 'status', 'items.originCountry', 'invoices', 'serviceType']);
+        $shipment->load(['senderProfile', 'senderProfile.country', 'senderProfile.city', 'recipientProfile', 'recipientProfile.country', 'recipientProfile.city', 'agency', 'status', 'items.originCountry', 'invoices.extraLines', 'creator.locker', 'originCountry', 'destCountry']);
 
         $doc = ShipmentDocumentSettings::merged();
         $invoice = $shipment->invoices->first();
@@ -125,6 +133,39 @@ class PdfController extends Controller
         $logistics = $this->logisticsForPdf($shipment, $doc);
 
         $tracking = (string) ($shipment->public_tracking ?? '');
+        $volDiv = max(0.0001, (float) ($doc['volumetric_divisor'] ?? 5000));
+        $docInvoice = trim((string) ($shipment->invoice_document_number ?? ''));
+        if ($docInvoice === '' && $invoice) {
+            $docInvoice = (string) ($invoice->invoice_number ?? '');
+        }
+        if ($docInvoice === '') {
+            $docInvoice = $tracking;
+        }
+
+        $snap = is_array($shipment->pricing_snapshot) ? $shipment->pricing_snapshot : [];
+        $itemsDeclaredSum = $shipment->items->sum(fn ($it) => (float) ($it->value ?? 0) * max(1, (int) ($it->quantity ?? 1)));
+        $declaredOnShipment = (float) ($shipment->declared_value ?? 0);
+        $fromSnapDeclared = (float) ($snap['declared_value_effective'] ?? 0);
+        $invoiceClientDeclared = $declaredOnShipment > 0 ? $declaredOnShipment : ($fromSnapDeclared > 0 ? $fromSnapDeclared : $itemsDeclaredSum);
+
+        $billingW = (float) ($metrics['billing_weight'] ?? 0);
+        $baseQuote = (float) ($snap['base_quote'] ?? 0);
+        $storedPpk = (float) ($snap['price_per_kg'] ?? 0);
+        if ($storedPpk > 0) {
+            $invoicePricePerKg = $storedPpk;
+        } elseif ($billingW > 0.00001 && $baseQuote > 0) {
+            $invoicePricePerKg = round($baseQuote / $billingW, 4);
+        } else {
+            $invoicePricePerKg = 0.0;
+        }
+
+        $coverage = $shipment->company_coverage_amount;
+        if ($coverage === null) {
+            $defCov = trim((string) Setting::getValue('default_company_coverage_amount', ''));
+            $invoiceCompanyCoverage = ($defCov !== '' && is_numeric($defCov)) ? (float) $defCov : null;
+        } else {
+            $invoiceCompanyCoverage = (float) $coverage;
+        }
 
         return [
             'shipment' => $shipment,
@@ -133,7 +174,13 @@ class PdfController extends Controller
             'metrics' => $metrics,
             'logistics' => $logistics,
             'preview' => $preview,
+            'volumetric_divisor' => $volDiv,
+            'document_invoice_number' => $docInvoice,
             'tracking_qr_data_uri' => QrCodeHelper::trackingDataUri($tracking, 120),
+            'tracking_barcode_data_uri' => QrCodeHelper::barcodeDataUri($tracking),
+            'invoice_price_per_kg' => $invoicePricePerKg,
+            'invoice_client_declared' => $invoiceClientDeclared,
+            'invoice_company_coverage' => $invoiceCompanyCoverage,
         ];
     }
 
@@ -142,7 +189,7 @@ class PdfController extends Controller
      */
     private function shipmentLabelViewData(Shipment $shipment, bool $preview): array
     {
-        $shipment->load(['sender.locker', 'senderClient', 'senderProfile', 'recipient', 'deliveryRecipient', 'recipientProfile', 'agency', 'status', 'items.originCountry', 'invoices', 'serviceType']);
+        $shipment->load(['senderProfile', 'senderProfile.country', 'senderProfile.city', 'recipientProfile', 'recipientProfile.country', 'recipientProfile.city', 'agency', 'status', 'items.originCountry', 'invoices.extraLines', 'creator.locker', 'originCountry', 'destCountry']);
 
         $doc = ShipmentDocumentSettings::merged();
         $invoice = $shipment->invoices->first();
@@ -157,7 +204,6 @@ class PdfController extends Controller
             'metrics' => $metrics,
             'logistics' => $logistics,
             'tracking_qr_data_uri' => QrCodeHelper::trackingDataUri($tracking, 220),
-            'invoice_paid' => $this->invoiceIsPaid($invoice),
             'preview' => $preview,
         ];
     }
@@ -187,14 +233,8 @@ class PdfController extends Controller
         }
 
         $deliveryTime = '—';
-        if (! empty($opts['delivery_time_id'])) {
-            $dt = DeliveryTime::query()->find((int) $opts['delivery_time_id']);
-            $lb = $dt?->label;
-            if (is_array($lb)) {
-                $deliveryTime = (string) ($lb['fr'] ?? $lb['en'] ?? reset($lb) ?? '—');
-            } elseif ($lb !== null && $lb !== '') {
-                $deliveryTime = (string) $lb;
-            }
+        if (! empty($opts['delivery_time_label'])) {
+            $deliveryTime = trim((string) $opts['delivery_time_label']) ?: '—';
         }
 
         $transport = (string) ($opts['transport_company_name'] ?? $doc['transport_company'] ?? '—');
@@ -258,17 +298,46 @@ class PdfController extends Controller
         ];
     }
 
-    private function invoiceIsPaid(?Invoice $invoice): bool
-    {
-        if (! $invoice) {
-            return false;
-        }
-
-        return $invoice->paid_at !== null || $invoice->status === 'paid';
-    }
-
     private function enableRemoteAssets(\Barryvdh\DomPDF\PDF $pdf): void
     {
         $pdf->getDomPDF()->getOptions()->set('isRemoteEnabled', true);
+    }
+
+    /**
+     * Pour DomPDF : n’utiliser que le logo embarqué (data URI). Une URL /storage/… en PNG
+     * provoquerait encore un chargement PNG (GD requis). Le data URI est produit par
+     * ShipmentDocumentSettings::logoFileDataUri (JPEG/SVG ou PNG si GD, sinon Imagick→JPEG).
+     *
+     * @param  array<string, mixed>  $doc
+     * @return array<string, mixed>
+     */
+    private function docForDomPdfLogo(array $doc): array
+    {
+        $doc['logo_url'] = null;
+
+        return $doc;
+    }
+
+    /**
+     * Les iframes (srcDoc) ne résolvent pas les URLs relatives /storage/... : forcer une URL absolue pour le logo.
+     *
+     * @param  array<string, mixed>  $doc
+     * @return array<string, mixed>
+     */
+    private function withAbsoluteLogoUrlForHtmlPreview(array $doc): array
+    {
+        if (! empty($doc['logo_data_uri'])) {
+            return $doc;
+        }
+        $url = $doc['logo_url'] ?? null;
+        if (! is_string($url) || $url === '') {
+            return $doc;
+        }
+        if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://') || str_starts_with($url, 'data:')) {
+            return $doc;
+        }
+        $doc['logo_url'] = rtrim((string) config('app.url'), '/').'/'.ltrim($url, '/');
+
+        return $doc;
     }
 }

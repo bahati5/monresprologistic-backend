@@ -17,7 +17,7 @@ class AddressBookResource extends JsonResource
             'alias' => $this->alias,
             'is_default' => $this->is_default,
             'notes' => $this->notes,
-            'contact' => new ProfileResource($this->whenLoaded('profile')),
+            'contact' => new ProfileResource($this->whenLoaded('contactProfile')),
             'created_at' => $this->created_at,
         ];
     }

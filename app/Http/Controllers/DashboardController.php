@@ -2,20 +2,20 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ShipmentStatus;
 use App\Models\AssistedPurchase;
-use App\Models\ClientWallet;
-use App\Models\CrmClient;
 use App\Models\CustomerPackage;
 use App\Models\Hub;
 use App\Models\Invoice;
+use App\Models\Locker;
 use App\Models\PaymentProof;
 use App\Models\Pickup;
 use App\Models\PreAlert;
-use App\Models\PurchaseOrder;
+use App\Models\Profile;
 use App\Models\Shipment;
 use App\Models\ShipmentLog;
-use App\Models\Status;
 use App\Models\User;
+use App\Services\ShipmentWorkflowService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -39,15 +39,15 @@ class DashboardController extends Controller
                     'id' => $p->id,
                     'address' => $p->address_text ?? '',
                     'scheduled_at' => $p->requested_window,
-                    'status' => $p->status?->code ?? 'pending',
+                    'status' => $p->status?->value ?? 'draft',
                     'client' => $p->client ? ['name' => $p->client->name, 'phone' => $p->client->phone] : null,
                     'latitude' => (float) $p->latitude,
                     'longitude' => (float) $p->longitude,
                 ]);
 
             $deliveriesToday = Shipment::query()
-                ->where('driver_id', $user->id)
-                ->with(['status', 'recipient'])
+                ->where('assigned_driver_id', $user->id)
+                ->with(['recipientProfile'])
                 ->latest()
                 ->take(20)
                 ->get();
@@ -63,8 +63,11 @@ class DashboardController extends Controller
                 'dashboard_type' => 'driver',
                 'stats' => [
                     'pickups_pending' => Pickup::where('assigned_driver_id', $user->id)->count(),
-                    'deliveries_pending' => Shipment::where('driver_id', $user->id)->whereHas('status', fn ($q) => $q->whereIn('code', ['in_transit', 'out_for_delivery']))->count(),
-                    'completed_today' => Shipment::where('driver_id', $user->id)->whereHas('status', fn ($q) => $q->where('code', 'delivered'))->whereDate('updated_at', today())->count(),
+                    'deliveries_pending' => Shipment::where('assigned_driver_id', $user->id)->whereIn('status', [
+                        ShipmentStatus::InTransit,
+                        ShipmentStatus::ArrivedAtDestination,
+                    ])->count(),
+                    'completed_today' => Shipment::where('assigned_driver_id', $user->id)->where('status', ShipmentStatus::Delivered)->whereDate('updated_at', today())->count(),
                 ],
                 'pickups_today' => $pickupsToday,
                 'deliveries_today' => $deliveriesToday,
@@ -73,31 +76,27 @@ class DashboardController extends Controller
         }
 
         if ($user->hasRole('client')) {
-            $crmId = \App\Models\CrmClient::query()->where('user_id', $user->id)->value('id');
+            $profileId = $user->profile_id;
             $shipments = Shipment::query()
-                ->where(function ($q) use ($user, $crmId) {
-                    $q->where('sender_id', $user->id)->orWhere('recipient_id', $user->id);
-                    if ($crmId) {
-                        $q->orWhere('sender_client_id', $crmId);
+                ->where(function ($q) use ($user, $profileId) {
+                    $q->where('creator_user_id', $user->id);
+                    if ($profileId) {
+                        $q->orWhere('sender_profile_id', $profileId);
                     }
                 })
-                ->with(['status'])
                 ->latest()
                 ->take(8)
                 ->get();
 
-            $locker = \App\Models\Locker::query()
-                ->where(function ($q) use ($user) {
-                    $q->where('user_id', $user->id)
-                        ->orWhereHas('crmClient', fn ($c) => $c->where('user_id', $user->id));
-                })
+            $locker = Locker::query()
+                ->where('user_id', $user->id)
                 ->first();
 
             $shipmentCountQ = Shipment::query()
-                ->where(function ($q) use ($user, $crmId) {
-                    $q->where('sender_id', $user->id)->orWhere('recipient_id', $user->id);
-                    if ($crmId) {
-                        $q->orWhere('sender_client_id', $crmId);
+                ->where(function ($q) use ($user, $profileId) {
+                    $q->where('creator_user_id', $user->id);
+                    if ($profileId) {
+                        $q->orWhere('sender_profile_id', $profileId);
                     }
                 });
 
@@ -111,17 +110,16 @@ class DashboardController extends Controller
                 'assistedCount' => AssistedPurchase::query()->where('user_id', $user->id)->count(),
                 'stats' => [
                     'pre_alerts' => $preAlertsCount,
-                    'purchase_orders' => PurchaseOrder::query()->where('user_id', $user->id)->count(),
+                    'purchase_orders' => AssistedPurchase::query()->where('user_id', $user->id)->count(),
                     'shipments_total' => (clone $shipmentCountQ)->count(),
-                    'wallet_balance' => (float) ClientWallet::query()->where('user_id', $user->id)->sum('balance'),
                 ],
             ]);
         }
 
         if ($user->hasRole('customs_agent')) {
             $customsShipments = Shipment::query()
-                ->whereHas('status', fn ($q) => $q->whereIn('code', ['customs', 'in_customs']))
-                ->with(['status', 'sender', 'recipient'])
+                ->where('status', ShipmentStatus::InTransit)
+                ->with(['senderProfile', 'recipientProfile'])
                 ->latest()
                 ->take(20)
                 ->get();
@@ -129,8 +127,8 @@ class DashboardController extends Controller
             return response()->json([
                 'dashboard_type' => 'customs',
                 'stats' => [
-                    'in_customs' => Shipment::whereHas('status', fn ($q) => $q->whereIn('code', ['customs', 'in_customs']))->count(),
-                    'cleared_today' => Shipment::whereHas('status', fn ($q) => $q->where('code', 'arrived'))
+                    'in_customs' => Shipment::where('status', ShipmentStatus::InTransit)->count(),
+                    'cleared_today' => Shipment::where('status', ShipmentStatus::ArrivedAtDestination)
                         ->whereDate('updated_at', today())->count(),
                     'pending_docs' => 0,
                 ],
@@ -140,7 +138,7 @@ class DashboardController extends Controller
 
         if ($user->hasRole('operator')) {
             $shipmentsQ = Shipment::query();
-            $this->scopeShipmentsFor($shipmentsQ, $user);
+            $this->scopeShipmentsForUser($shipmentsQ, $user);
 
             $packagesToday = CustomerPackage::query();
             if (! $user->canAccessAllAgencies()) {
@@ -155,7 +153,7 @@ class DashboardController extends Controller
         }
 
         $shipmentsQ = Shipment::query();
-        $this->scopeShipmentsFor($shipmentsQ, $user);
+        $this->scopeShipmentsForUser($shipmentsQ, $user);
 
         return response()->json($this->buildStaffDashboardPayload($user, 'admin', $shipmentsQ));
     }
@@ -172,7 +170,10 @@ class DashboardController extends Controller
             ->where('status', 'pending')
             ->count();
 
-        $clientsQ = CrmClient::query();
+        // Fiches « client » = profils rattachés à une agence (comme ClientController), pas les profils staff sans agence.
+        $clientsQ = Profile::query()
+            ->whereNotNull('agency_id')
+            ->where('is_active', true);
         if (! $user->canAccessAllAgencies()) {
             $clientsQ->where('agency_id', $user->agency_id);
         }
@@ -214,7 +215,7 @@ class DashboardController extends Controller
                 'status_distribution' => $this->buildShipmentStatusDistribution($shipmentsQ),
             ],
             'recent_activity' => $this->buildRecentActivity($shipmentsQ),
-            'recent_shipments' => (clone $shipmentsQ)->with(['status', 'sender', 'recipient'])->latest()->take(10)->get(),
+            'recent_shipments' => (clone $shipmentsQ)->with(['senderProfile', 'recipientProfile'])->latest()->take(10)->get(),
         ];
 
         if ($dashboardType === 'admin') {
@@ -282,18 +283,20 @@ class DashboardController extends Controller
     protected function buildShipmentStatusDistribution(Builder $shipmentsQ): array
     {
         $distRows = (clone $shipmentsQ)
-            ->select('shipments.status_id', DB::raw('COUNT(*) as c'))
-            ->whereNotNull('shipments.status_id')
-            ->groupBy('shipments.status_id')
+            ->select('shipments.status', DB::raw('COUNT(*) as c'))
+            ->whereNotNull('shipments.status')
+            ->groupBy('shipments.status')
             ->get();
 
-        return $distRows->map(function ($row) {
-            $st = Status::query()->find($row->status_id);
+        $workflow = app(ShipmentWorkflowService::class);
+
+        return $distRows->map(function ($row) use ($workflow) {
+            $enum = ShipmentStatus::tryFromString($row->status);
 
             return [
-                'name' => $st?->name ?? '—',
+                'name' => $enum?->label() ?? '—',
                 'value' => (int) $row->c,
-                'color' => $st?->color_hex ?? '#64748B',
+                'color' => $enum ? $workflow->colorHexForStatus($enum) : '#64748B',
             ];
         })->values()->all();
     }
@@ -305,17 +308,15 @@ class DashboardController extends Controller
     {
         $logs = ShipmentLog::query()
             ->whereIn('shipment_id', (clone $shipmentsQ)->select('shipments.id'))
-            ->with(['user', 'status'])
+            ->with(['user'])
             ->orderByDesc('created_at')
             ->limit(20)
             ->get();
 
-        $locale = app()->getLocale();
-
-        return $logs->map(function (ShipmentLog $log) use ($locale) {
+        return $logs->map(function (ShipmentLog $log) {
             $title = $log->title;
-            if (! $title && $log->status) {
-                $title = $log->status->getTranslation('name', $locale) ?: $log->status->code;
+            if (! $title && $log->status instanceof ShipmentStatus) {
+                $title = $log->status->label();
             }
             $title = $title ?: 'Mise à jour';
 

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\ShipmentStatus;
+use App\Support\ConfigurableReferenceCode;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,7 +20,7 @@ class PreAlert extends Model implements HasMedia
         'reference_code',
         'user_id',
         'locker_id',
-        'status_id',
+        'status',
         'merchant_name',
         'vendor_tracking_number',
         'carrier_name',
@@ -35,6 +37,7 @@ class PreAlert extends Model implements HasMedia
     protected function casts(): array
     {
         return [
+            'status' => ShipmentStatus::class,
             'declared_value' => 'decimal:2',
             'purchase_date' => 'date',
             'estimated_arrival_date' => 'date',
@@ -43,9 +46,16 @@ class PreAlert extends Model implements HasMedia
 
     public static function generateReferenceCode(): string
     {
-        $last = static::query()->orderByDesc('id')->value('id') ?? 0;
-
-        return 'ASN-'.str_pad($last + 1, 4, '0', STR_PAD_LEFT);
+        return ConfigurableReferenceCode::allocate(
+            'prealert_reference_format',
+            '{prefix}-{seq}',
+            'prealert_reference_prefix',
+            'ASN',
+            'prealert_reference_seq_pad',
+            4,
+            'prealert_next_seq',
+            static::query(),
+        );
     }
 
     public function user(): BelongsTo
@@ -56,11 +66,6 @@ class PreAlert extends Model implements HasMedia
     public function locker(): BelongsTo
     {
         return $this->belongsTo(Locker::class);
-    }
-
-    public function status(): BelongsTo
-    {
-        return $this->belongsTo(Status::class);
     }
 
     public function customerPackage(): HasOne
@@ -86,6 +91,6 @@ class PreAlert extends Model implements HasMedia
     {
         return $query
             ->whereNull('converted_customer_package_id')
-            ->whereDoesntHave('status', fn (Builder $s) => $s->where('code', 'received_hub'));
+            ->where('status', '!=', ShipmentStatus::ReceivedAtHub->value);
     }
 }

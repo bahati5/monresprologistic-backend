@@ -2,17 +2,17 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Http\Controllers\Concerns\DenormalizesRecipientLocation;
+use App\Http\Controllers\Concerns\InteractsWithAgencyVisibility;
 use App\Http\Controllers\Concerns\NormalizesOptionalEmail;
 use App\Http\Controllers\Controller;
-use App\Http\Controllers\Concerns\InteractsWithAgencyVisibility;
+use App\Http\Controllers\Settings\ShipLineController;
 use App\Models\AddressBook;
 use App\Models\Agency;
-use App\Models\DeliveryTime;
 use App\Models\Locker;
 use App\Models\Profile;
 use App\Models\Setting;
 use App\Models\User;
+use App\Support\LockerNumberGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,9 +22,8 @@ use Illuminate\Validation\Rules;
 
 class ShipmentWizardController extends Controller
 {
-    use DenormalizesRecipientLocation;
-    use NormalizesOptionalEmail;
     use InteractsWithAgencyVisibility;
+    use NormalizesOptionalEmail;
 
     /**
      * Recherche fiches clients (Profiles avec agency_id, possiblement avec compte portail).
@@ -69,20 +68,19 @@ class ShipmentWizardController extends Controller
             'client_id' => ['nullable', 'exists:profiles,id'],
         ]);
 
-        $term = '%' . $request->input('q') . '%';
+        $term = '%'.$request->input('q').'%';
         $clientProfileId = $request->input('client_id');
 
         if ($clientProfileId) {
             $clientProfile = Profile::find($clientProfileId);
-            $ownerId = $clientProfile?->user?->id;
 
-            if (! $ownerId) {
+            if (! $clientProfile) {
                 return response()->json([]);
             }
 
             $query = AddressBook::query()
-                ->where('owner_id', $ownerId)
-                ->whereHas('profile', function ($q) use ($term) {
+                ->where('owner_profile_id', $clientProfile->id)
+                ->whereHas('contactProfile', function ($q) use ($term) {
                     $q->where('is_active', true)
                         ->where(function ($inner) use ($term) {
                             $inner->where('first_name', 'like', $term)
@@ -92,26 +90,27 @@ class ShipmentWizardController extends Controller
                                 ->orWhereRaw("CONCAT(first_name, ' ', last_name) like ?", [$term]);
                         });
                 })
-                ->with(['profile.city', 'profile.country'])
+                ->with(['contactProfile.city', 'contactProfile.country'])
                 ->limit(20);
 
             $entries = $query->get();
 
             return response()->json(
                 $entries->map(fn (AddressBook $e) => [
-                    'id' => $e->profile->id,
+                    'id' => $e->contactProfile->id,
                     'address_book_id' => $e->id,
-                    'name' => $e->profile->full_name,
-                    'email' => $e->profile->email,
-                    'phone' => $e->profile->phone,
-                    'city' => $e->profile->city?->name ?? '',
-                    'country' => $e->profile->country?->name ?? '',
+                    'name' => $e->contactProfile->full_name,
+                    'email' => $e->contactProfile->email,
+                    'phone' => $e->contactProfile->phone,
+                    'city' => $e->contactProfile->city?->name ?? '',
+                    'country' => $e->contactProfile->country?->name ?? '',
                 ])
             );
         }
 
         $profiles = Profile::query()
             ->where('is_active', true)
+            ->where('is_staff', false)
             ->search($request->input('q'))
             ->with(['city', 'country'])
             ->limit(20)
@@ -201,6 +200,8 @@ class ShipmentWizardController extends Controller
                     'phone' => $data['phone'],
                     'phone_secondary' => $data['phone_secondary'] ?? null,
                     'email' => $data['email'] ?? $profile->email,
+                    'is_client' => true,
+                    'is_staff' => false,
                 ]);
             } else {
                 $profile = Profile::create([
@@ -217,11 +218,13 @@ class ShipmentWizardController extends Controller
                     'city_id' => $data['city_id'],
                     'agency_id' => $authUser->agency_id,
                     'is_active' => true,
+                    'is_client' => true,
+                    'is_staff' => false,
                 ]);
             }
 
             if ($createPortal && ! $profile->user) {
-                $fullName = trim($data['first_name'] . ' ' . $data['last_name']);
+                $fullName = trim($data['first_name'].' '.$data['last_name']);
                 $portalUser = User::create([
                     'profile_id' => $profile->id,
                     'name' => $fullName,
@@ -237,19 +240,7 @@ class ShipmentWizardController extends Controller
                 $portalUser->assignRole('client');
             }
 
-            $prefix = Setting::getValue('locker_prefix', 'MRP');
-            $digits = (int) Setting::getValue('locker_digits', '4');
-            $mode = Setting::getValue('locker_mode', 'random');
-
-            if ($mode === 'sequential') {
-                $last = Locker::query()->orderByDesc('id')->value('code');
-                $lastNum = $last ? (int) preg_replace('/\D/', '', $last) : 0;
-                $code = $prefix . '-' . str_pad($lastNum + 1, $digits, '0', STR_PAD_LEFT);
-            } else {
-                do {
-                    $code = $prefix . '-' . str_pad(random_int(0, pow(10, $digits) - 1), $digits, '0', STR_PAD_LEFT);
-                } while (Locker::where('code', $code)->exists());
-            }
+            $code = LockerNumberGenerator::generate();
 
             $template = Setting::getValue('locker_address_template', '');
             $formatted = str_replace('{{locker_code}}', $code, $template);
@@ -313,9 +304,7 @@ class ShipmentWizardController extends Controller
             abort(403);
         }
 
-        $ownerId = $clientProfile->user?->id;
-
-        $result = DB::transaction(function () use ($data, $ownerId, $clientProfile) {
+        $result = DB::transaction(function () use ($data, $clientProfile) {
             $profile = null;
 
             if (! empty($data['email'])) {
@@ -340,21 +329,21 @@ class ShipmentWizardController extends Controller
                     'city_id' => $data['city_id'],
                     'agency_id' => $clientProfile->agency_id,
                     'is_active' => true,
+                    'is_client' => false,
+                    'is_staff' => false,
                 ]);
             }
 
-            if ($ownerId) {
-                $exists = AddressBook::where('owner_id', $ownerId)
-                    ->where('profile_id', $profile->id)
-                    ->exists();
+            $exists = AddressBook::where('owner_profile_id', $clientProfile->id)
+                ->where('contact_profile_id', $profile->id)
+                ->exists();
 
-                if (! $exists) {
-                    AddressBook::create([
-                        'owner_id' => $ownerId,
-                        'profile_id' => $profile->id,
-                        'is_default' => false,
-                    ]);
-                }
+            if (! $exists) {
+                AddressBook::create([
+                    'owner_profile_id' => $clientProfile->id,
+                    'contact_profile_id' => $profile->id,
+                    'is_default' => false,
+                ]);
             }
 
             return $profile;
@@ -369,32 +358,6 @@ class ShipmentWizardController extends Controller
             'phone' => $result->phone,
             'city' => $result->city?->name ?? '',
             'country' => $result->country?->name ?? '',
-        ], 201);
-    }
-
-    public function quickCreateDeliveryTime(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'shipping_mode_id' => ['required', 'integer', 'exists:shipping_modes,id'],
-            'label' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string', 'max:500'],
-        ]);
-
-        $maxSort = (int) DeliveryTime::query()
-            ->where('shipping_mode_id', $data['shipping_mode_id'])
-            ->max('sort_order');
-
-        $row = DeliveryTime::query()->create([
-            'shipping_mode_id' => $data['shipping_mode_id'],
-            'label' => $data['label'],
-            'description' => $data['description'] ?? null,
-            'is_active' => true,
-            'sort_order' => $maxSort + 1,
-        ]);
-
-        return response()->json([
-            'id' => $row->id,
-            'label' => $row->label,
         ], 201);
     }
 
@@ -422,16 +385,16 @@ class ShipmentWizardController extends Controller
 
         if ($relatedTo) {
             $relatedProfile = Profile::find($relatedTo);
-            $ownerUser = $relatedProfile?->user;
 
-            if ($ownerUser) {
-                $relatedProfileIds = AddressBook::where('owner_id', $ownerUser->id)
-                    ->pluck('profile_id');
+            if ($relatedProfile) {
+                $relatedProfileIds = AddressBook::where('owner_profile_id', $relatedProfile->id)
+                    ->pluck('contact_profile_id');
             }
         }
 
         $query = Profile::query()
             ->where('is_active', true)
+            ->where('is_staff', false)
             ->search($request->input('q'))
             ->with(['user', 'city', 'country']);
 
@@ -489,6 +452,6 @@ class ShipmentWizardController extends Controller
      */
     public function shipLinesForRoute(Request $request): JsonResponse
     {
-        return app(\App\Http\Controllers\Settings\ShipLineController::class)->forRoute($request);
+        return app(ShipLineController::class)->forRoute($request);
     }
 }

@@ -18,7 +18,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'view_lockers', 'manage_lockers',
             'view_payments', 'approve_payments', 'manage_finances',
             'manage_pickups', 'assign_drivers',
-            'view_consolidations', 'create_consolidations', 'manage_consolidations',
+            'view_regroupements', 'create_regroupements', 'manage_regroupements',
             'manage_settings', 'manage_agencies', 'manage_users', 'manage_roles',
             'view_reports', 'export_data',
             'manage_statuses', 'manage_pricing', 'manage_notifications',
@@ -27,7 +27,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'manage_newsletter', 'manage_backups',
             'view_crm', 'view_inbound',
             'manage_customer_packages', 'view_customer_packages',
-            'manage_recipients', 'view_tracking',
+            'view_tracking',
             'manage_documents', 'manage_translations',
         ];
 
@@ -42,7 +42,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'view_lockers', 'manage_lockers',
                 'view_payments', 'approve_payments', 'manage_finances',
                 'manage_pickups', 'assign_drivers',
-                'view_consolidations', 'create_consolidations', 'manage_consolidations',
+                'view_regroupements', 'create_regroupements', 'manage_regroupements',
                 'manage_users', 'manage_roles', 'view_reports', 'export_data',
                 'manage_pre_alerts', 'manage_assisted_purchases',
                 'manage_settings', 'manage_statuses', 'manage_pricing', 'manage_notifications',
@@ -51,7 +51,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'manage_newsletter',
                 'view_crm', 'view_inbound',
                 'manage_customer_packages', 'view_customer_packages',
-                'manage_recipients', 'view_tracking',
+                'view_tracking',
                 'manage_documents', 'manage_translations',
             ],
             'operator' => [
@@ -59,10 +59,10 @@ class RolesAndPermissionsSeeder extends Seeder
                 'view_lockers', 'manage_lockers', 'view_payments',
                 'manage_pre_alerts', 'manage_assisted_purchases',
                 'manage_pickups', 'assign_drivers',
-                'view_consolidations', 'create_consolidations',
+                'view_regroupements', 'create_regroupements',
                 'view_inbound',
                 'manage_customer_packages', 'view_customer_packages',
-                'manage_recipients', 'view_tracking',
+                'view_tracking',
             ],
             'driver' => [
                 'manage_pickups', 'view_shipments', 'view_tracking',
@@ -74,7 +74,6 @@ class RolesAndPermissionsSeeder extends Seeder
                 'view_shipments', 'view_lockers',
                 'manage_pre_alerts', 'manage_assisted_purchases',
                 'view_customer_packages', 'view_tracking',
-                'manage_recipients',
             ],
         ];
 

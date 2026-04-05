@@ -5,145 +5,128 @@
     <title>Étiquette — {{ $shipment->public_tracking }}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10px; color: #1e293b; margin: 0; padding: 0; }
-        .label-page { width: 283px; height: 425px; padding: 10px; position: relative; overflow: hidden; }
-        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 6px; }
-        .brand-name { font-size: 16px; font-weight: 800; letter-spacing: -0.3px; }
-        .brand-sub { font-size: 7px; color: #666; margin-top: 1px; }
-        .qr-main { text-align: center; margin: 6px 0; }
-        .qr-main img { width: 180px; height: 180px; display: inline-block; }
-        .tracking { font-family: 'Courier New', Courier, monospace; font-size: 18px; font-weight: 900; text-align: center; letter-spacing: 2px; margin: 4px 0; }
-        .locker-id { text-align: center; margin: 5px 0; padding: 4px 0; background: #000; color: #fff; font-size: 14px; font-weight: 800; letter-spacing: 1px; }
-        .destination { text-align: center; font-size: 20px; font-weight: 900; margin: 6px 0; padding: 5px 0; border-top: 1px solid #333; border-bottom: 1px solid #333; text-transform: uppercase; }
-        .actors { width: 100%; margin: 6px 0; }
-        .actors td { width: 50%; vertical-align: top; padding: 0; font-size: 8px; }
-        .actors td:first-child { padding-right: 4px; }
-        .actors td:last-child { padding-left: 4px; }
-        .actor-box { border: 1px solid #ccc; border-radius: 3px; padding: 4px 5px; height: 60px; }
-        .actor-title { font-size: 7px; font-weight: 700; text-transform: uppercase; color: #888; margin-bottom: 2px; }
-        .actor-name { font-size: 10px; font-weight: 700; }
-        .actor-detail { font-size: 7px; color: #555; }
-        .meta-row { text-align: center; font-size: 7px; color: #555; margin: 4px 0; }
-        .meta-row strong { color: #000; }
-        .payment-strip { text-align: center; margin: 4px 0; padding: 3px 0; font-size: 10px; font-weight: 800; border-radius: 3px; }
-        .pay-ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
-        .pay-no { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
-        .no-print { display: none; }
-        @if(!empty($preview)) .no-print { display: block; } @endif
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10px; color: #000; margin: 0; padding: 15px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+        td { vertical-align: top; border: 1px solid #000; padding: 4px; }
+        
+        .header { text-align: center; margin-bottom: 10px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+        .logo-img { height: 35px; filter: grayscale(100%); margin-bottom: 4px; }
+        
+        .qr-section { text-align: center; margin: 10px 0; }
+        .qr-img { width: 140px; height: 140px; }
+        
+        .tracking-num { font-size: 16px; font-weight: 900; text-align: center; margin: 5px 0; letter-spacing: 1px; }
+        
+        .locker-box { background-color: #000; color: #fff; text-align: center; font-size: 18px; font-weight: 900; padding: 6px 0; margin: 8px 0; text-transform: uppercase; }
+        
+        .dest-title { font-size: 22px; font-weight: 900; text-align: center; border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 8px 0; margin: 8px 0; text-transform: uppercase; }
+        
+        .actor-label { font-size: 8px; font-weight: bold; color: #666; text-transform: uppercase; margin-bottom: 2px; }
+        .actor-name { font-size: 11px; font-weight: 900; }
+        
+        .meta-row { text-align: center; font-size: 9px; margin-top: 5px; }
+
         @media print { .no-print { display: none !important; } }
     </style>
 </head>
 <body>
 @php
-    $sender = $shipment->sender;
-    $senderClient = $shipment->senderClient;
-    $recipient = $shipment->recipient;
-    $deliveryRecipient = $shipment->deliveryRecipient ?? null;
+    $sp = $shipment->senderProfile;
+    $rp = $shipment->recipientProfile;
+    $recipName = $rp?->full_name ?? '—';
+    $recipPhone = $rp?->phone ?? '';
+    $recipCity = $rp?->city?->name ?? '';
+    $recipCountry = $rp?->country?->name ?? '';
+    if (is_array($recipCountry)) {
+        $recipCountry = $recipCountry['fr'] ?? $recipCountry['en'] ?? reset($recipCountry) ?? '';
+    }
+    $recipCountry = is_string($recipCountry) ? $recipCountry : '';
 
-    $senderName = $senderClient->company_name ?? $senderClient->name ?? $sender?->name ?? '—';
-    $senderLocker = $sender?->locker?->code ?? null;
+    $senderName = $sp?->company_name ?? $sp?->full_name ?? '—';
+    $senderLocker = $shipment->creator?->locker?->code ?? null;
 
-    $recipName = $deliveryRecipient->name ?? $recipient?->name ?? '—';
-    $recipPhone = $deliveryRecipient->phone ?? $recipient?->phone ?? '';
-    $recipCity = $deliveryRecipient->city ?? '';
-    $recipCountry = $deliveryRecipient->country ?? '';
-
-    $destLine = trim(implode(' → ', array_filter([$recipCity, $recipCountry])));
-    if ($destLine === '') $destLine = $recipName;
-
-    $cur = $shipment->currency ?? $doc['currency'] ?? 'USD';
-    $payStatus = $shipment->payment_status ?? 'unpaid';
-    $isPaid = $invoice_paid || $payStatus === 'paid';
-
-    $serviceLabel = is_array($shipment->serviceType?->name)
-        ? ($shipment->serviceType->name['fr'] ?? reset($shipment->serviceType->name))
-        : ($shipment->serviceType?->name ?? '');
-    $log = $logistics ?? ['shippingMode' => '—', 'deliveryTime' => '—', 'transport' => '—', 'shipLine' => '—'];
+    $originCountry = $shipment->originCountry?->name ?? $sp?->country?->name ?? '';
+    $destCountry = $shipment->destCountry?->name ?? $rp?->country?->name ?? '';
+    if (is_array($originCountry)) {
+        $originCountry = $originCountry['fr'] ?? $originCountry['en'] ?? reset($originCountry) ?? '';
+    }
+    if (is_array($destCountry)) {
+        $destCountry = $destCountry['fr'] ?? $destCountry['en'] ?? reset($destCountry) ?? '';
+    }
+    $senderCity = $sp?->city?->name ?? '';
+    if (is_array($senderCity)) {
+        $senderCity = $senderCity['fr'] ?? $senderCity['en'] ?? reset($senderCity) ?? '';
+    }
+    if (is_array($recipCity)) {
+        $recipCity = $recipCity['fr'] ?? $recipCity['en'] ?? reset($recipCity) ?? '';
+    }
+    $routeMain = trim(implode(' → ', array_filter([is_string($originCountry) ? trim($originCountry) : '', is_string($destCountry) ? trim($destCountry) : ''])));
+    if ($routeMain === '') {
+        $routeMain = trim(implode(' → ', array_filter([$recipCity, $recipCountry])));
+    }
+    if ($routeMain === '') {
+        $routeMain = $recipName;
+    }
+    $destLine = $routeMain;
 @endphp
 
 <div class="label-page">
     {{-- HEADER --}}
     <div class="header">
         @if(!empty($doc['logo_data_uri']))
-            <img src="{{ $doc['logo_data_uri'] }}" alt="{{ $doc['site_name'] }}" height="22" style="filter:grayscale(100%);"><br>
-        @elseif(!empty($doc['logo_url']))
-            <img src="{{ $doc['logo_url'] }}" alt="{{ $doc['site_name'] }}" height="22" style="filter:grayscale(100%);"><br>
+            <img src="{{ $doc['logo_data_uri'] }}" class="logo-img" alt="Logo"><br>
         @else
-            <div class="brand-name">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
+            <div style="font-size: 18px; font-weight: 900;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
         @endif
-        <div class="brand-sub">{{ $doc['phone'] ?? '' }} · {{ $doc['site_email'] ?? '' }}</div>
+        <div style="font-size: 8px; color: #333;">
+            {{ $doc['phone'] ?? '' }} · {{ $doc['site_email'] ?? '' }}
+        </div>
     </div>
 
-    {{-- QR suivi --}}
+    {{-- QR CODE --}}
     @if(!empty($tracking_qr_data_uri))
-    <div class="qr-main">
-        <img src="{{ $tracking_qr_data_uri }}" alt="QR suivi">
+    <div class="qr-section">
+        <img src="{{ $tracking_qr_data_uri }}" class="qr-img" alt="QR Suivi">
     </div>
     @endif
 
-    {{-- TRACKING NUMBER --}}
-    <div class="tracking">{{ $shipment->public_tracking ?? '—' }}</div>
+    {{-- TRACKING --}}
+    <div class="tracking-num">{{ $shipment->public_tracking ?? '—' }}</div>
 
-    {{-- LOCKER ID --}}
+    {{-- CASIER --}}
     @if($senderLocker)
-    <div class="locker-id">CASIER : {{ $senderLocker }}</div>
+    <div class="locker-box">CASIER : {{ $senderLocker }}</div>
     @endif
 
     {{-- DESTINATION --}}
-    <div class="destination">{{ $destLine }}</div>
+    <div class="dest-title">{{ $destLine }}</div>
 
-    {{-- SENDER / RECIPIENT --}}
-    <table class="actors">
+    {{-- ACTORS --}}
+    <table>
         <tr>
-            <td>
-                <div class="actor-box">
-                    <div class="actor-title">Expéditeur</div>
-                    <div class="actor-name">{{ \Illuminate\Support\Str::limit($senderName, 28) }}</div>
-                    <div class="actor-detail">{{ $sender?->email ?? $senderClient->email ?? '' }}</div>
-                    <div class="actor-detail">{{ $sender?->phone ?? $senderClient->phone ?? '' }}</div>
-                </div>
+            <td style="width: 50%;">
+                <div class="actor-label">Expéditeur</div>
+                <div class="actor-name">{{ \Illuminate\Support\Str::limit($senderName, 25) }}</div>
+                <div style="font-size: 8px;">{{ $sp?->phone ?? '' }}</div>
             </td>
-            <td>
-                <div class="actor-box">
-                    <div class="actor-title">Destinataire</div>
-                    <div class="actor-name">{{ \Illuminate\Support\Str::limit($recipName, 28) }}</div>
-                    <div class="actor-detail">{{ $recipPhone }}</div>
-                    <div class="actor-detail">{{ $recipCity }}@if($recipCity && $recipCountry), @endif{{ $recipCountry }}</div>
-                </div>
+            <td style="width: 50%;">
+                <div class="actor-label">Destinataire</div>
+                <div class="actor-name">{{ \Illuminate\Support\Str::limit($recipName, 25) }}</div>
+                <div style="font-size: 8px;">{{ $recipPhone }}</div>
             </td>
         </tr>
     </table>
 
-    {{-- SHIPMENT META --}}
+    {{-- META --}}
     <div class="meta-row">
         <strong>{{ $shipment->created_at?->format('d/m/Y') }}</strong> ·
-        Colis : <strong>{{ $metrics['item_count'] }}</strong> ·
-        Poids : <strong>{{ $metrics['billing_weight'] }} {{ $doc['weight_unit'] ?? 'kg' }}</strong> ·
-        <strong>{{ number_format((float) ($shipment->calculated_price ?? 0), 2) }} {{ $cur }}</strong>
+        Poids: <strong>{{ $metrics['billing_weight'] }} {{ $doc['weight_unit'] ?? 'kg' }}</strong> ·
+        Items: <strong>{{ $metrics['item_count'] }}</strong>
     </div>
-    <div class="meta-row">
-        @if(($log['shippingMode'] ?? '—') !== '—')<strong>{{ $log['shippingMode'] }}</strong>@else{{ $serviceLabel }}@endif
-        @if(($log['deliveryTime'] ?? '—') !== '—') · {{ $log['deliveryTime'] }} @endif
+    <div class="meta-row" style="font-size: 10px; font-weight: bold; margin-top: 2px;">
+        {{ $logistics['shippingMode'] }} · {{ $logistics['deliveryTime'] }}
     </div>
-    <div class="meta-row">
-        @if(($log['transport'] ?? '—') !== '—'){{ $log['transport'] }}@endif
-        @if(($log['transport'] ?? '—') !== '—' && ($log['shipLine'] ?? '—') !== '—') · @endif
-        @if(($log['shipLine'] ?? '—') !== '—'){{ $log['shipLine'] }}@endif
-    </div>
-
-    {{-- PAYMENT STATUS --}}
-    <div class="payment-strip {{ $isPaid ? 'pay-ok' : 'pay-no' }}">
-        {{ $isPaid ? '✓ PAYÉ' : '✗ NON PAYÉ' }}
-    </div>
-
 </div>
 
-@if(!empty($preview))
-<div class="no-print" style="text-align:center; margin-top:15px;">
-    <button onclick="window.print()" style="padding:8px 20px; background:#333; color:#fff; border:none; border-radius:4px; font-size:13px; cursor:pointer;">
-        Imprimer
-    </button>
-</div>
-@endif
 </body>
 </html>

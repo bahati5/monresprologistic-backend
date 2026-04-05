@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -15,7 +16,7 @@ use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
+    /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, HasRoles, Notifiable;
 
     /**
@@ -26,21 +27,13 @@ class User extends Authenticatable
     protected $fillable = [
         'profile_id',
         'name',
-        'first_name',
-        'last_name',
         'email',
         'phone',
-        'phone_mobile',
         'password',
         'locker_number',
         'agency_id',
         'theme_preference',
         'can_view_all_agencies',
-        'billing_address',
-        'billing_postal_code',
-        'billing_country_id',
-        'billing_state_id',
-        'billing_city_id',
     ];
 
     /**
@@ -67,6 +60,8 @@ class User extends Authenticatable
         ];
     }
 
+    // ─── Relationships ───────────────────────────────
+
     public function profile(): BelongsTo
     {
         return $this->belongsTo(Profile::class);
@@ -74,14 +69,14 @@ class User extends Authenticatable
 
     public function savedContacts(): BelongsToMany
     {
-        return $this->belongsToMany(Profile::class, 'address_books', 'owner_id', 'profile_id')
+        return $this->belongsToMany(Profile::class, 'address_books', 'owner_profile_id', 'contact_profile_id', 'profile_id', 'id')
             ->withPivot('id', 'alias', 'is_default', 'notes')
             ->withTimestamps();
     }
 
     public function addressBookEntries(): HasMany
     {
-        return $this->hasMany(AddressBook::class, 'owner_id');
+        return $this->hasMany(AddressBook::class, 'owner_profile_id', 'profile_id');
     }
 
     public function agency(): BelongsTo
@@ -94,38 +89,12 @@ class User extends Authenticatable
         return $this->hasOne(Locker::class);
     }
 
-    public function recipients(): HasMany
+    public function createdShipments(): HasMany
     {
-        return $this->hasMany(Recipient::class);
+        return $this->hasMany(Shipment::class, 'creator_user_id');
     }
 
-    /**
-     * Fiche client CRM liée (un utilisateur portail max. une fiche).
-     */
-    public function crmClientProfile(): HasOne
-    {
-        return $this->hasOne(CrmClient::class, 'user_id');
-    }
-
-    public function billingCountry(): BelongsTo
-    {
-        return $this->belongsTo(Country::class, 'billing_country_id');
-    }
-
-    public function billingState(): BelongsTo
-    {
-        return $this->belongsTo(State::class, 'billing_state_id');
-    }
-
-    public function billingCity(): BelongsTo
-    {
-        return $this->belongsTo(City::class, 'billing_city_id');
-    }
-
-    public function driverProfile(): HasOne
-    {
-        return $this->hasOne(DriverProfile::class);
-    }
+    // ─── Helpers ─────────────────────────────────────
 
     public function isSuperAdmin(): bool
     {
@@ -142,4 +111,3 @@ class User extends Authenticatable
         return $this->can($permission);
     }
 }
-

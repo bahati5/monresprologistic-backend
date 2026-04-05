@@ -10,6 +10,7 @@ class ShipmentItem extends Model
     protected $fillable = [
         'shipment_id', 'description', 'quantity', 'weight_kg',
         'length_cm', 'width_cm', 'height_cm', 'value', 'origin_country_id',
+        'delivery_time_label',
     ];
 
     public function shipment(): BelongsTo

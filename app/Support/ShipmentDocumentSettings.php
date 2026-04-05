@@ -17,12 +17,6 @@ class ShipmentDocumentSettings
         $phone = Setting::getValue('phone_mobile') ?: Setting::getValue('phone_fixed');
         $logoDataUri = self::logoFileDataUri($logoPath);
         $logoUrl = $logoPath ? self::publicStorageUrl($logoPath) : null;
-        if ($logoUrl !== null && $logoDataUri === null && ! extension_loaded('gd') && $logoPath && Storage::disk('public')->exists($logoPath)) {
-            $mime = @mime_content_type(Storage::disk('public')->path($logoPath)) ?: '';
-            if (preg_match('#^image/(png|jpe?g|webp|gif)$#i', (string) $mime)) {
-                $logoUrl = null;
-            }
-        }
 
         return array_merge($cfg, [
             'site_name' => Setting::getValue('site_name', $cfg['defaults']['site_name'] ?? 'Monrespro'),
@@ -78,16 +72,39 @@ class ShipmentDocumentSettings
         return $base.'?'.http_build_query($query);
     }
 
-    /** URL relative /storage/... pour le même hôte que le front (proxy Vite). */
+    /**
+     * URL publique du fichier (disque public), en général absolue via APP_URL.
+     * Évite les images cassées quand le SPA est sur un autre port / domaine que l’API.
+     */
     public static function publicStorageUrl(string $path): string
     {
         $path = ltrim(str_replace('\\', '/', $path), '/');
+        if (str_starts_with($path, 'storage/')) {
+            $path = substr($path, strlen('storage/'));
+        }
+
+        return Storage::disk('public')->url($path);
+    }
+
+    /**
+     * Chemin relatif /storage/... pour le SPA : résolu côté front (proxy Vite ou VITE_API_URL).
+     * Évite les URLs absolues basées sur APP_URL incorrect (localhost vs LAN, etc.).
+     */
+    public static function publicStorageWebPath(string $path): string
+    {
+        $path = ltrim(str_replace('\\', '/', $path), '/');
+        if (str_starts_with($path, 'storage/')) {
+            $path = substr($path, strlen('storage/'));
+        }
 
         return '/storage/'.$path;
     }
 
     /**
-     * Image logo en data URI pour DomPDF (évite les échecs de chargement HTTP distants).
+     * Logo en data URI pour factures / PDF.
+     *
+     * DomPDF intègre le JPEG et le SVG sans extension GD ; le PNG exige GD (sinon erreur 500).
+     * Avec GD : on renvoie le fichier tel quel. Sans GD : conversion PNG/WebP/GIF → JPEG via Imagick si dispo.
      */
     public static function logoFileDataUri(?string $relativePath): ?string
     {
@@ -101,21 +118,67 @@ class ShipmentDocumentSettings
         if (! is_readable($full)) {
             return null;
         }
-        $mime = @mime_content_type($full) ?: 'image/png';
-        if (! str_starts_with((string) $mime, 'image/')) {
-            return null;
-        }
-
-        // DomPDF intègre les images raster via GD sur beaucoup d’environnements ; sans GD, pas de logo embarqué.
-        if (! extension_loaded('gd') && preg_match('#^image/(png|jpe?g|webp|gif)$#i', (string) $mime)) {
-            return null;
-        }
 
         $raw = @file_get_contents($full);
-        if ($raw === false) {
+        if ($raw === false || $raw === '') {
             return null;
         }
 
-        return 'data:'.$mime.';base64,'.base64_encode($raw);
+        $mime = strtolower((string) (@mime_content_type($full) ?: ''));
+        $lowerPath = strtolower($relativePath);
+
+        $isSvg = str_contains($mime, 'svg') || str_ends_with($lowerPath, '.svg');
+        if ($isSvg) {
+            $m = str_contains($mime, 'svg') ? (str_contains($mime, 'xml') ? $mime : 'image/svg+xml') : 'image/svg+xml';
+
+            return 'data:'.$m.';base64,'.base64_encode($raw);
+        }
+
+        $isJpeg = in_array($mime, ['image/jpeg', 'image/jpg'], true)
+            || str_ends_with($lowerPath, '.jpg')
+            || str_ends_with($lowerPath, '.jpeg');
+
+        if ($isJpeg) {
+            return 'data:image/jpeg;base64,'.base64_encode($raw);
+        }
+
+        if (extension_loaded('gd')) {
+            if ($mime === '' || ! str_starts_with($mime, 'image/')) {
+                return null;
+            }
+
+            return 'data:'.$mime.';base64,'.base64_encode($raw);
+        }
+
+        if (extension_loaded('imagick')) {
+            try {
+                $im = new \Imagick;
+                $im->readImageBlob($raw);
+                if (strtoupper((string) $im->getImageFormat()) === 'SVG' || strtoupper((string) $im->getImageFormat()) === 'MSVG') {
+                    $im->setImageFormat('svg');
+                    $blob = $im->getImageBlob();
+                    $im->clear();
+                    $im->destroy();
+
+                    return 'data:image/svg+xml;base64,'.base64_encode($blob);
+                }
+                $im->setImageBackgroundColor(new \ImagickPixel('white'));
+                if ($im->getImageAlphaChannel()) {
+                    $im->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
+                    $im = $im->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
+                }
+                $im->setImageFormat('jpeg');
+                $im->setImageCompressionQuality(90);
+                $jpeg = $im->getImageBlob();
+                $im->clear();
+                $im->destroy();
+
+                return 'data:image/jpeg;base64,'.base64_encode($jpeg);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
     }
 }

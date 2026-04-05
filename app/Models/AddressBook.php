@@ -10,8 +10,8 @@ class AddressBook extends Model
     protected $table = 'address_books';
 
     protected $fillable = [
-        'owner_id',
-        'profile_id',
+        'owner_profile_id',
+        'contact_profile_id',
         'alias',
         'is_default',
         'notes',
@@ -24,13 +24,13 @@ class AddressBook extends Model
         ];
     }
 
-    public function owner(): BelongsTo
+    public function ownerProfile(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'owner_id');
+        return $this->belongsTo(Profile::class, 'owner_profile_id');
     }
 
-    public function profile(): BelongsTo
+    public function contactProfile(): BelongsTo
     {
-        return $this->belongsTo(Profile::class);
+        return $this->belongsTo(Profile::class, 'contact_profile_id');
     }
 }

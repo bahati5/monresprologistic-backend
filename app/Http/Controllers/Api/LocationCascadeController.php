@@ -70,7 +70,9 @@ class LocationCascadeController extends Controller
      */
     public function timezones(Request $request): JsonResponse
     {
-        $identifiers = \DateTimeZone::listIdentifiers(\DateTimeZone::ALL);
+        $identifiers = Cache::remember('locations.iana_timezones_v1', 86_400, static function (): array {
+            return \DateTimeZone::listIdentifiers(\DateTimeZone::ALL);
+        });
 
         if ($request->filled('search')) {
             $needle = mb_strtolower((string) $request->input('search'));

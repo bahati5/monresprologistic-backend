@@ -3,10 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Agency;
-use App\Models\DriverProfile;
+use App\Models\Profile;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules;
 
@@ -19,7 +20,7 @@ class DriverController extends Controller
         $user = $request->user();
         $query = User::query()
             ->role('driver')
-            ->with(['agency', 'driverProfile']);
+            ->with(['agency', 'profile']);
 
         if (! $user->canAccessAllAgencies()) {
             $query->where('agency_id', $user->agency_id);
@@ -31,7 +32,7 @@ class DriverController extends Controller
                 $q->where('name', 'like', "%{$search}%")
                     ->orWhere('email', 'like', "%{$search}%")
                     ->orWhere('phone', 'like', "%{$search}%")
-                    ->orWhereHas('driverProfile', fn ($dp) => $dp->where('vehicle_plate', 'like', "%{$search}%"));
+                    ->orWhereHas('profile', fn ($p) => $p->where('vehicle_plate', 'like', "%{$search}%"));
             });
         }
 
@@ -41,7 +42,7 @@ class DriverController extends Controller
 
         if ($request->filled('available')) {
             $available = $request->boolean('available');
-            $query->whereHas('driverProfile', fn ($q) => $q->where('is_available', $available));
+            $query->whereHas('profile', fn ($q) => $q->where('is_available', $available));
         }
 
         $drivers = $query->latest()->paginate(25)->withQueryString();
@@ -71,19 +72,19 @@ class DriverController extends Controller
             'emergency_phone' => ['nullable', 'string', 'max:32'],
         ]);
 
-        $driver = User::create([
-            'name' => $data['name'],
+        $agencyId = $data['agency_id'] ?? $request->user()->agency_id;
+
+        // Create the driver's profile (source of truth for identity)
+        $nameParts = explode(' ', $data['name'], 2);
+        $profile = Profile::create([
+            'first_name' => $nameParts[0],
+            'last_name' => $nameParts[1] ?? '',
             'email' => $data['email'],
             'phone' => $data['phone'] ?? null,
-            'password' => Hash::make($data['password']),
-            'agency_id' => $data['agency_id'] ?? $request->user()->agency_id,
-            'email_verified_at' => now(),
-        ]);
-
-        $driver->assignRole('driver');
-
-        DriverProfile::create([
-            'user_id' => $driver->id,
+            'agency_id' => $agencyId,
+            'type' => 'individual',
+            'is_staff' => true,
+            'is_client' => false,
             'license_number' => $data['license_number'] ?? null,
             'license_expiry' => $data['license_expiry'] ?? null,
             'vehicle_type' => $data['vehicle_type'] ?? null,
@@ -92,7 +93,20 @@ class DriverController extends Controller
             'coverage_zone' => $data['coverage_zone'] ?? null,
             'emergency_contact' => $data['emergency_contact'] ?? null,
             'emergency_phone' => $data['emergency_phone'] ?? null,
+            'is_available' => true,
         ]);
+
+        $driver = User::create([
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'phone' => $data['phone'] ?? null,
+            'password' => Hash::make($data['password']),
+            'agency_id' => $agencyId,
+            'profile_id' => $profile->id,
+            'email_verified_at' => now(),
+        ]);
+
+        $driver->assignRole('driver');
 
         return response()->json(['message' => 'Chauffeur créé.']);
     }
@@ -101,7 +115,7 @@ class DriverController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'unique:users,email,' . $driver->id],
+            'email' => ['required', 'email', 'unique:users,email,'.$driver->id],
             'phone' => ['nullable', 'string', 'max:32'],
             'agency_id' => ['nullable', 'exists:agencies,id'],
             'license_number' => ['nullable', 'string', 'max:64'],
@@ -122,9 +136,15 @@ class DriverController extends Controller
             'agency_id' => $data['agency_id'],
         ]);
 
-        $driver->driverProfile()->updateOrCreate(
-            ['user_id' => $driver->id],
-            [
+        // Update driver-specific fields on the profile
+        $profile = $driver->profile;
+        if ($profile) {
+            $nameParts = explode(' ', $data['name'], 2);
+            $profile->update([
+                'first_name' => $nameParts[0],
+                'last_name' => $nameParts[1] ?? '',
+                'email' => $data['email'],
+                'phone' => $data['phone'] ?? null,
                 'license_number' => $data['license_number'] ?? null,
                 'license_expiry' => $data['license_expiry'] ?? null,
                 'vehicle_type' => $data['vehicle_type'] ?? null,
@@ -134,8 +154,8 @@ class DriverController extends Controller
                 'emergency_contact' => $data['emergency_contact'] ?? null,
                 'emergency_phone' => $data['emergency_phone'] ?? null,
                 'is_available' => $data['is_available'] ?? true,
-            ]
-        );
+            ]);
+        }
 
         return response()->json(['message' => 'Chauffeur mis à jour.']);
     }
@@ -151,7 +171,7 @@ class DriverController extends Controller
         return response()->json(['message' => 'Statut du chauffeur modifié.']);
     }
 
-    private function getAgencies(User $user): \Illuminate\Support\Collection
+    private function getAgencies(User $user): Collection
     {
         if ($user->canAccessAllAgencies()) {
             return Agency::where('is_active', true)->get(['id', 'name']);

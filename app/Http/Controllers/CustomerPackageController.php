@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ShipmentStatus;
 use App\Models\CustomerPackage;
-use App\Models\Status;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class CustomerPackageController extends Controller
 {
@@ -15,7 +16,7 @@ class CustomerPackageController extends Controller
         $user = $request->user();
         $isClient = $user->hasRole('client');
 
-        $q = CustomerPackage::query()->with(['user', 'status', 'locker', 'preAlert'])->latest();
+        $q = CustomerPackage::query()->with(['user', 'locker', 'preAlert'])->latest();
 
         if ($isClient) {
             $q->where('user_id', $user->id);
@@ -70,14 +71,12 @@ class CustomerPackageController extends Controller
         ]);
 
         $targetUser = User::with('locker')->find($data['user_id']);
-        $receivedStatus = Status::query()->where('code', 'received_hub')->first();
-
         CustomerPackage::query()->create([
             'reference_code' => CustomerPackage::generateReferenceCode(),
             'user_id' => $data['user_id'],
             'agency_id' => $request->user()->agency_id,
             'locker_id' => $targetUser?->locker?->id,
-            'status_id' => $receivedStatus?->id,
+            'status' => ShipmentStatus::ReceivedAtHub,
             'description' => $data['description'],
             'weight_kg' => $data['weight'] ?? null,
             'length_cm' => $data['length'] ?? null,
@@ -95,7 +94,7 @@ class CustomerPackageController extends Controller
 
     public function show(Request $request, CustomerPackage $customerPackage): JsonResponse
     {
-        $customerPackage->load(['user.locker', 'status', 'locker', 'preAlert', 'receivedByUser']);
+        $customerPackage->load(['user.locker', 'locker', 'preAlert', 'receivedByUser']);
 
         return response()->json([
             'customerPackage' => $customerPackage,
@@ -107,10 +106,10 @@ class CustomerPackageController extends Controller
         $this->authorizeStaff($request);
 
         $data = $request->validate([
-            'status_id' => ['required', 'exists:statuses,id'],
+            'status' => ['required', 'string', Rule::enum(ShipmentStatus::class)],
         ]);
 
-        $customerPackage->update(['status_id' => $data['status_id']]);
+        $customerPackage->update(['status' => ShipmentStatus::from($data['status'])]);
 
         return response()->json(['message' => 'Statut mis à jour.']);
     }

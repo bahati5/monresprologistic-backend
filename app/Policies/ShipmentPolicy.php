@@ -2,7 +2,6 @@
 
 namespace App\Policies;
 
-use App\Models\CrmClient;
 use App\Models\Shipment;
 use App\Models\User;
 
@@ -16,11 +15,10 @@ class ShipmentPolicy
     public function view(User $user, Shipment $shipment): bool
     {
         if ($user->hasRole('client')) {
-            $crmId = CrmClient::query()->where('user_id', $user->id)->value('id');
+            $profileId = $user->profile_id;
 
-            return $shipment->sender_id === $user->id
-                || $shipment->recipient_id === $user->id
-                || ($crmId && (int) $shipment->sender_client_id === (int) $crmId);
+            return (int) $shipment->creator_user_id === (int) $user->id
+                || ($profileId && (int) $shipment->sender_profile_id === (int) $profileId);
         }
 
         if (! $user->can('view_shipments')) {

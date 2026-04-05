@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Locker extends Model
 {
     protected $fillable = [
-        'crm_client_id',
         'profile_id',
         'user_id',
         'code',
@@ -24,11 +23,6 @@ class Locker extends Model
     public function profile(): BelongsTo
     {
         return $this->belongsTo(Profile::class);
-    }
-
-    public function crmClient(): BelongsTo
-    {
-        return $this->belongsTo(CrmClient::class, 'crm_client_id');
     }
 
     public function preAlerts(): HasMany

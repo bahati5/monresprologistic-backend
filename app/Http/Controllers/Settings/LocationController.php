@@ -34,7 +34,7 @@ class LocationController extends Controller
         $code = strtoupper($data['code']);
         $iso2 = strtoupper($data['iso2'] ?? $code);
 
-        Country::create([
+        $country = Country::query()->create([
             'name' => $data['name'],
             'code' => $code,
             'iso2' => strlen($iso2) >= 2 ? $iso2 : $code,
@@ -44,7 +44,10 @@ class LocationController extends Controller
 
         Cache::forget('phone_countries');
 
-        return response()->json(['message' => 'Pays créé.']);
+        return response()->json([
+            'message' => 'Pays créé.',
+            'country' => $country->only(['id', 'name', 'code', 'iso2', 'emoji', 'is_active']),
+        ]);
     }
 
     public function destroyCountry(Country $country): JsonResponse
@@ -63,9 +66,12 @@ class LocationController extends Controller
             'is_active' => ['boolean'],
         ]);
 
-        State::create($data);
+        $state = State::query()->create($data);
 
-        return response()->json(['message' => 'État/Province créé.']);
+        return response()->json([
+            'message' => 'État/Province créé.',
+            'state' => $state->only(['id', 'name', 'code', 'country_id', 'is_active']),
+        ]);
     }
 
     public function destroyState(State $state): JsonResponse
@@ -83,9 +89,12 @@ class LocationController extends Controller
             'is_active' => ['boolean'],
         ]);
 
-        City::create($data);
+        $city = City::query()->create($data);
 
-        return response()->json(['message' => 'Ville créée.']);
+        return response()->json([
+            'message' => 'Ville créée.',
+            'city' => $city->only(['id', 'name', 'state_id', 'is_active']),
+        ]);
     }
 
     public function destroyCity(City $city): JsonResponse

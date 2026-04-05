@@ -15,14 +15,18 @@ class AddressBookController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
+        $ownerProfileId = $user->profile_id;
+        if (! $ownerProfileId) {
+            abort(422, 'Profil utilisateur requis pour le carnet d\'adresses.');
+        }
 
         $query = AddressBook::query()
-            ->where('owner_id', $user->id)
-            ->with(['profile.city', 'profile.state', 'profile.country']);
+            ->where('owner_profile_id', $ownerProfileId)
+            ->with(['contactProfile.city', 'contactProfile.state', 'contactProfile.country']);
 
         if ($request->filled('search')) {
-            $term = '%' . $request->input('search') . '%';
-            $query->whereHas('profile', function ($q) use ($term) {
+            $term = '%'.$request->input('search').'%';
+            $query->whereHas('contactProfile', function ($q) use ($term) {
                 $q->where('first_name', 'like', $term)
                     ->orWhere('last_name', 'like', $term)
                     ->orWhere('email', 'like', $term)
@@ -84,6 +88,10 @@ class AddressBookController extends Controller
         ]);
 
         $entry = DB::transaction(function () use ($data, $user) {
+            if (! $user->profile_id) {
+                abort(422, 'Profil utilisateur requis pour le carnet d\'adresses.');
+            }
+
             $profile = null;
 
             if (! empty($data['email'])) {
@@ -109,11 +117,13 @@ class AddressBookController extends Controller
                     'country_id' => $data['country_id'] ?? null,
                     'agency_id' => $user->agency_id,
                     'is_active' => true,
+                    'is_client' => false,
+                    'is_staff' => false,
                 ]);
             }
 
-            $existing = AddressBook::where('owner_id', $user->id)
-                ->where('profile_id', $profile->id)
+            $existing = AddressBook::where('owner_profile_id', $user->profile_id)
+                ->where('contact_profile_id', $profile->id)
                 ->first();
 
             if ($existing) {
@@ -121,19 +131,19 @@ class AddressBookController extends Controller
             }
 
             if (! empty($data['is_default'])) {
-                AddressBook::where('owner_id', $user->id)->update(['is_default' => false]);
+                AddressBook::where('owner_profile_id', $user->profile_id)->update(['is_default' => false]);
             }
 
             return AddressBook::create([
-                'owner_id' => $user->id,
-                'profile_id' => $profile->id,
+                'owner_profile_id' => $user->profile_id,
+                'contact_profile_id' => $profile->id,
                 'alias' => $data['alias'] ?? null,
                 'is_default' => $data['is_default'] ?? false,
                 'notes' => $data['notes'] ?? null,
             ]);
         });
 
-        $entry->load('profile.city', 'profile.state', 'profile.country');
+        $entry->load('contactProfile.city', 'contactProfile.state', 'contactProfile.country');
 
         return response()->json([
             'message' => 'Contact ajouté au carnet d\'adresses.',
@@ -145,7 +155,7 @@ class AddressBookController extends Controller
     {
         $this->authorizeOwner(request()->user(), $addressBook);
 
-        $addressBook->load('profile.city', 'profile.state', 'profile.country', 'profile.user');
+        $addressBook->load('contactProfile.city', 'contactProfile.state', 'contactProfile.country', 'contactProfile.user');
 
         return response()->json([
             'entry' => new AddressBookResource($addressBook),
@@ -178,7 +188,7 @@ class AddressBookController extends Controller
             $pivotData = array_intersect_key($data, array_flip($pivotFields));
 
             if (! empty($pivotData['is_default'])) {
-                AddressBook::where('owner_id', $addressBook->owner_id)
+                AddressBook::where('owner_profile_id', $addressBook->owner_profile_id)
                     ->where('id', '!=', $addressBook->id)
                     ->update(['is_default' => false]);
             }
@@ -194,11 +204,11 @@ class AddressBookController extends Controller
             $profileData = array_intersect_key($data, array_flip($profileFields));
 
             if (! empty($profileData)) {
-                $addressBook->profile->update($profileData);
+                $addressBook->contactProfile->update($profileData);
             }
         });
 
-        $addressBook->load('profile.city', 'profile.state', 'profile.country');
+        $addressBook->load('contactProfile.city', 'contactProfile.state', 'contactProfile.country');
 
         return response()->json([
             'message' => 'Contact mis à jour.',
@@ -220,7 +230,7 @@ class AddressBookController extends Controller
         $this->authorizeOwner($request->user(), $addressBook);
 
         DB::transaction(function () use ($addressBook) {
-            AddressBook::where('owner_id', $addressBook->owner_id)
+            AddressBook::where('owner_profile_id', $addressBook->owner_profile_id)
                 ->where('id', '!=', $addressBook->id)
                 ->update(['is_default' => false]);
 
@@ -232,7 +242,7 @@ class AddressBookController extends Controller
 
     private function authorizeOwner($user, AddressBook $addressBook): void
     {
-        if ((int) $addressBook->owner_id !== (int) $user->id) {
+        if (! $user->profile_id || (int) $addressBook->owner_profile_id !== (int) $user->profile_id) {
             abort(403);
         }
     }
