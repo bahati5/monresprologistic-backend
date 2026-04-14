@@ -128,6 +128,14 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('permission:manage_assisted_purchases');
     Route::post('assisted-purchases/{assisted_purchase}/mark-ordered', [AssistedPurchaseController::class, 'markAsOrdered'])
         ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/resend-quote', [AssistedPurchaseController::class, 'resendQuote'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/mark-paid', [AssistedPurchaseController::class, 'markPaid'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/client-payment-ack', [AssistedPurchaseController::class, 'clientPaymentAck']);
+    Route::get('assisted-purchases/{assisted_purchase}/payment-proof', [AssistedPurchaseController::class, 'downloadPaymentProof']);
+    Route::post('assisted-purchases/{assisted_purchase}/convert-to-shipment', [AssistedPurchaseController::class, 'convertToShipment'])
+        ->middleware('permission:manage_assisted_purchases');
 
     // --- Purchase Orders ---
     Route::apiResource('purchase-orders', PurchaseOrderController::class)
@@ -212,6 +220,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:manage_clients')->group(function () {
         Route::get('clients', [ClientController::class, 'index']);
         Route::get('clients/{client}', [ClientController::class, 'show']);
+        Route::get('clients/{client}/activity', [ClientController::class, 'activity']);
         Route::post('clients', [ClientController::class, 'store']);
         Route::patch('clients/{client}', [ClientController::class, 'update']);
         Route::post('clients/{client}/toggle-active', [ClientController::class, 'toggleActive']);
@@ -298,9 +307,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::patch('notifications/{notificationTemplate}', [NotificationTemplateController::class, 'update']);
         });
 
+        // Public read access for payment methods (needed for checkout)
         Route::get('payment-methods', [PaymentMethodController::class, 'index']);
-        Route::post('payment-methods', [PaymentMethodController::class, 'store']);
-        Route::delete('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'destroy']);
+        Route::post('payment-methods', [PaymentMethodController::class, 'store'])->middleware('permission:manage_settings');
+        Route::delete('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'destroy'])->middleware('permission:manage_settings');
 
         Route::get('billing-extras', [BillingExtraController::class, 'index']);
         Route::post('billing-extras', [BillingExtraController::class, 'store']);
@@ -342,8 +352,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('ship-lines/{shipLine}', [ShipLineController::class, 'update']);
         Route::delete('ship-lines/{shipLine}', [ShipLineController::class, 'destroy']);
 
+        // Public read access for payment gateways (needed for checkout)
         Route::get('payment-gateways', [PaymentGatewayController::class, 'index']);
-        Route::put('payment-gateways', [PaymentGatewayController::class, 'update']);
+        Route::put('payment-gateways', [PaymentGatewayController::class, 'update'])->middleware('permission:manage_settings');
 
         Route::get('agency-payment-coordinates', [AgencyPaymentCoordinateController::class, 'index']);
         Route::post('agency-payment-coordinates', [AgencyPaymentCoordinateController::class, 'store']);
@@ -351,9 +362,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('smtp-config', [SmtpConfigController::class, 'index']);
         Route::put('smtp-config', [SmtpConfigController::class, 'update']);
+        Route::post('smtp-config/test', [SmtpConfigController::class, 'test']);
 
         Route::get('twilio-config', [TwilioConfigController::class, 'index']);
         Route::put('twilio-config', [TwilioConfigController::class, 'update']);
+        Route::post('twilio-config/test', [TwilioConfigController::class, 'test']);
 
         Route::get('merchants', [MerchantController::class, 'index']);
         Route::post('merchants', [MerchantController::class, 'store']);

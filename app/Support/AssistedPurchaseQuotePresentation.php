@@ -77,8 +77,8 @@ final class AssistedPurchaseQuotePresentation
         $rawName = $user ? (is_string($user->name) ? $user->name : (string) $user->name) : '';
         $clientFirstName = trim(explode(' ', $rawName)[0] ?? '') ?: 'cher client';
 
-        $base = rtrim((string) env('FRONTEND_URL', config('app.url')), '/');
-        $paymentUrl = $base.'/purchase-orders';
+        $base = FrontendPortalUrl::base();
+        $paymentUrl = $base.'/purchase-orders/'.$purchase->id;
 
         $note = $purchase->payment_methods_note;
         $paymentMethodsNote = $note !== null && trim($note) !== '' ? trim($note) : null;

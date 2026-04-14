@@ -35,7 +35,6 @@ class ShipmentWizardController extends Controller
         $user = $request->user();
 
         $query = Profile::query()
-            ->whereNotNull('agency_id')
             ->search($request->input('q'))
             ->with(['user'])
             ->limit(20);
@@ -49,6 +48,8 @@ class ShipmentWizardController extends Controller
         return response()->json(
             $rows->map(fn (Profile $p) => [
                 'id' => $p->id,
+                /** Compte portail (shopping assisté « au nom de », expéditions, etc.). */
+                'user_id' => $p->user?->id,
                 'name' => $p->full_name,
                 'email' => $p->email ?? $p->user?->email ?? '',
                 'phone' => $p->phone,

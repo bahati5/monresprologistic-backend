@@ -13,10 +13,11 @@ class AssistedPurchase extends Model
     protected $fillable = [
         'user_id', 'status', 'operator_id', 'product_url', 'article_label', 'line_notes', 'notes', 'size', 'color', 'quantity',
         'price_displayed', 'price_currency', 'quote_amount', 'quote_currency', 'service_fee', 'bank_fee_percentage', 'payment_methods_note', 'supplier_tracking_number', 'total_amount',
-        'commission_breakdown', 'quoted_at', 'paid_at', 'purchased_at', 'converted_pre_alert_id',
+        'commission_breakdown', 'quoted_at', 'paid_at', 'purchased_at', 'converted_pre_alert_id', 'converted_shipment_id',
+        'payment_proof_path',
     ];
 
-    protected $appends = ['status_label', 'status_color'];
+    protected $appends = ['status_label', 'status_color', 'payment_proof_url'];
 
     protected function casts(): array
     {
@@ -50,6 +51,18 @@ class AssistedPurchase extends Model
         });
     }
 
+    protected function paymentProofUrl(): Attribute
+    {
+        return Attribute::get(function () {
+            $path = $this->payment_proof_path;
+            if (! $path || trim($path) === '') {
+                return null;
+            }
+
+            return url('/api/assisted-purchases/'.$this->id.'/payment-proof');
+        });
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -68,5 +81,10 @@ class AssistedPurchase extends Model
     public function convertedPreAlert(): BelongsTo
     {
         return $this->belongsTo(PreAlert::class, 'converted_pre_alert_id');
+    }
+
+    public function convertedShipment(): BelongsTo
+    {
+        return $this->belongsTo(Shipment::class, 'converted_shipment_id');
     }
 }

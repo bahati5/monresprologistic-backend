@@ -22,6 +22,7 @@ class Shipment extends Model
         'regroupement_id',
         'master_shipment_id',
         'pre_alert_id',
+        'assisted_purchase_id',
         'assigned_driver_id',
         'weight_kg',
         'volumetric_weight_kg',
@@ -93,6 +94,11 @@ class Shipment extends Model
     public function preAlert(): BelongsTo
     {
         return $this->belongsTo(PreAlert::class);
+    }
+
+    public function assistedPurchase(): BelongsTo
+    {
+        return $this->belongsTo(AssistedPurchase::class);
     }
 
     public function currentHub(): BelongsTo

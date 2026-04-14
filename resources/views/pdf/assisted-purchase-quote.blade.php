@@ -243,6 +243,12 @@
                     Réglez votre devis depuis votre espace client après réception de ce document.
                 </div>
             @endif
+            @if(!empty($present['paymentUrl']))
+                <div class="note-block" style="margin-top: 12px;">
+                    <strong>Accéder au devis en ligne (connexion requise)</strong><br>
+                    <span style="font-size: 9pt; word-break: break-all; color: #3d3d69;">{{ $present['paymentUrl'] }}</span>
+                </div>
+            @endif
         </td>
         <td style="width:48%">
             <table class="totals">

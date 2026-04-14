@@ -88,27 +88,33 @@ class AssistedPurchaseQuoteMail extends Mailable
             'items',
         ]);
 
-        $present = AssistedPurchaseQuotePresentation::forPurchase($this->purchase);
-        $clientRows = AssistedPurchaseQuotePresentation::clientDetailRows($this->purchase);
-        $quotedAt = $this->purchase->quoted_at ?? now();
+        try {
+            $present = AssistedPurchaseQuotePresentation::forPurchase($this->purchase);
+            $clientRows = AssistedPurchaseQuotePresentation::clientDetailRows($this->purchase);
+            $quotedAt = $this->purchase->quoted_at ?? now();
 
-        $html = view('pdf.assisted-purchase-quote', [
-            'purchase' => $this->purchase,
-            'present' => $present,
-            'clientRows' => $clientRows,
-            'quotedAtFormatted' => $quotedAt->timezone(config('app.timezone'))->translatedFormat('d F Y'),
-            'accent' => '#3d3d69',
-        ])->render();
+            $html = view('pdf.assisted-purchase-quote', [
+                'purchase' => $this->purchase,
+                'present' => $present,
+                'clientRows' => $clientRows,
+                'quotedAtFormatted' => $quotedAt->timezone(config('app.timezone'))->translatedFormat('d F Y'),
+                'accent' => '#3d3d69',
+            ])->render();
 
-        $binary = Pdf::loadHTML($html)
-            ->setPaper('a4')
-            ->setOption('defaultFont', 'DejaVu Sans')
-            ->setOption('isRemoteEnabled', true)
-            ->output();
+            $binary = Pdf::loadHTML($html)
+                ->setPaper('a4')
+                ->setOption('defaultFont', 'DejaVu Sans')
+                ->setOption('isRemoteEnabled', true)
+                ->output();
 
-        return [
-            Attachment::fromData(fn () => $binary, 'devis-achat-assiste-'.$this->purchase->id.'.pdf')
-                ->withMime('application/pdf'),
-        ];
+            return [
+                Attachment::fromData(fn () => $binary, 'devis-achat-assiste-'.$this->purchase->id.'.pdf')
+                    ->withMime('application/pdf'),
+            ];
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [];
+        }
     }
 }

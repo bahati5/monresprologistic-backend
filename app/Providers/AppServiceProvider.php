@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Listeners\ProvisionRegisteredUser;
 use App\Models\Shipment;
 use App\Observers\ShipmentObserver;
+use App\Support\DynamicMailSettings;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Vite;
@@ -37,5 +38,7 @@ class AppServiceProvider extends ServiceProvider
 
         Event::listen(Registered::class, ProvisionRegisteredUser::class);
         Shipment::observe(ShipmentObserver::class);
+
+        DynamicMailSettings::applyFromDatabaseIfConfigured();
     }
 }

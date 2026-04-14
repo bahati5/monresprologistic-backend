@@ -9,6 +9,7 @@ enum AssistedPurchaseStatus: string
     case PAID = 'paid';
     case ORDERED = 'ordered';
     case ARRIVED_AT_HUB = 'arrived_at_hub';
+    case CONVERTED_TO_SHIPMENT = 'converted_to_shipment';
     case CANCELLED = 'cancelled';
 
     public function label(): string
@@ -19,6 +20,7 @@ enum AssistedPurchaseStatus: string
             self::PAID => 'Paiement validé',
             self::ORDERED => 'Acheté chez le fournisseur',
             self::ARRIVED_AT_HUB => 'Colis reçu à l\'entrepôt',
+            self::CONVERTED_TO_SHIPMENT => 'Converti en expédition',
             self::CANCELLED => 'Annulé',
         };
     }
@@ -31,6 +33,7 @@ enum AssistedPurchaseStatus: string
             self::PAID => 'bg-emerald-100 text-emerald-800',
             self::ORDERED => 'bg-purple-100 text-purple-800',
             self::ARRIVED_AT_HUB => 'bg-green-100 text-green-800',
+            self::CONVERTED_TO_SHIPMENT => 'bg-indigo-100 text-indigo-800',
             self::CANCELLED => 'bg-red-100 text-red-800',
         };
     }

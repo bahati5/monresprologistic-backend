@@ -42,6 +42,8 @@ class ProfileResource extends JsonResource
             'is_active' => $this->is_active,
             'is_client' => $this->is_client,
             'is_staff' => $this->is_staff,
+            'is_recipient' => $this->whenCounted('savedByProfiles', fn () => ($this->saved_by_profiles_count ?? 0) > 0, false),
+            'address_book_count' => $this->whenCounted('savedByProfiles', fn () => (int) ($this->saved_by_profiles_count ?? 0)),
             'has_account' => $this->relationLoaded('user') ? $this->user !== null : null,
             'locker_number' => $this->whenLoaded('user', fn () => $this->user?->locker_number),
             'created_at' => $this->created_at,

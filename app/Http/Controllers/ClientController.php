@@ -29,7 +29,6 @@ class ClientController extends Controller
         $user = $request->user();
 
         $query = Profile::query()
-            ->whereNotNull('agency_id')
             ->with(['agency', 'user', 'city', 'state', 'country'])
             ->withCount(['savedByProfiles as address_book_count']);
 
@@ -367,6 +366,113 @@ class ClientController extends Controller
         return response()->json([
             'message' => 'Compte portail créé pour ce client.',
             'client' => new ProfileResource($client->fresh(['user'])),
+        ]);
+    }
+
+    public function activity(Request $request, Profile $client): JsonResponse
+    {
+        $this->authorizeAgency($request->user(), $client);
+
+        $client->load(['agency', 'user', 'city', 'state', 'country']);
+        $client->loadCount('savedByProfiles');
+
+        $userId = $client->user?->id;
+
+        // Shipments sent by this client
+        $sentShipments = Shipment::query()
+            ->where('sender_profile_id', $client->id)
+            ->with(['recipientProfile', 'status'])
+            ->latest()
+            ->paginate(10, ['*'], 'sent_page');
+
+        // Shipments received by this client (as recipient)
+        $receivedShipments = Shipment::query()
+            ->where('recipient_profile_id', $client->id)
+            ->with(['senderProfile', 'status'])
+            ->latest()
+            ->paginate(10, ['*'], 'received_page');
+
+        // Assisted purchases
+        $assistedPurchases = \App\Models\AssistedPurchase::query()
+            ->where('user_id', $userId)
+            ->orWhereHas('preAlert', fn($q) => $q->where('user_id', $userId))
+            ->latest()
+            ->paginate(10, ['*'], 'purchase_page');
+
+        // Shipment notices / pre-alerts
+        $shipmentNotices = \App\Models\PreAlert::query()
+            ->where('user_id', $userId)
+            ->latest()
+            ->paginate(10, ['*'], 'notice_page');
+
+        // Invoices
+        $invoices = $userId
+            ? Invoice::query()->where('user_id', $userId)->latest()->paginate(10, ['*'], 'invoice_page')
+            : collect();
+
+        // Address book entries (contacts saved by this client)
+        $addressBookEntries = AddressBook::query()
+            ->where('owner_profile_id', $client->id)
+            ->with('contactProfile')
+            ->latest()
+            ->paginate(10, ['*'], 'contact_page');
+
+        return response()->json([
+            'client' => new ProfileResource($client),
+            'sentShipments' => [
+                'data' => $sentShipments->items(),
+                'meta' => [
+                    'current_page' => $sentShipments->currentPage(),
+                    'last_page' => $sentShipments->lastPage(),
+                    'per_page' => $sentShipments->perPage(),
+                    'total' => $sentShipments->total(),
+                ],
+            ],
+            'receivedShipments' => [
+                'data' => $receivedShipments->items(),
+                'meta' => [
+                    'current_page' => $receivedShipments->currentPage(),
+                    'last_page' => $receivedShipments->lastPage(),
+                    'per_page' => $receivedShipments->perPage(),
+                    'total' => $receivedShipments->total(),
+                ],
+            ],
+            'assistedPurchases' => [
+                'data' => $assistedPurchases->items(),
+                'meta' => [
+                    'current_page' => $assistedPurchases->currentPage(),
+                    'last_page' => $assistedPurchases->lastPage(),
+                    'per_page' => $assistedPurchases->perPage(),
+                    'total' => $assistedPurchases->total(),
+                ],
+            ],
+            'shipmentNotices' => [
+                'data' => $shipmentNotices->items(),
+                'meta' => [
+                    'current_page' => $shipmentNotices->currentPage(),
+                    'last_page' => $shipmentNotices->lastPage(),
+                    'per_page' => $shipmentNotices->perPage(),
+                    'total' => $shipmentNotices->total(),
+                ],
+            ],
+            'invoices' => [
+                'data' => $invoices->items(),
+                'meta' => [
+                    'current_page' => $invoices->currentPage(),
+                    'last_page' => $invoices->lastPage(),
+                    'per_page' => $invoices->perPage(),
+                    'total' => $invoices->total(),
+                ],
+            ],
+            'addressBookEntries' => [
+                'data' => $addressBookEntries->items(),
+                'meta' => [
+                    'current_page' => $addressBookEntries->currentPage(),
+                    'last_page' => $addressBookEntries->lastPage(),
+                    'per_page' => $addressBookEntries->perPage(),
+                    'total' => $addressBookEntries->total(),
+                ],
+            ],
         ]);
     }
 
