@@ -44,13 +44,20 @@
     $instructions  = $isPickup ? ($pickup->notes ?? null) : ($shipment?->delivery_notes ?? null);
     $driverName    = $driver?->name ?? '—';
     $generatedAt   = now()->format('d/m/Y à H:i');
+    $doc = $doc ?? [];
 @endphp
 
 {{-- En-tête --}}
 <table class="header-table">
     <tr>
         <td style="width: 55%;">
-            <div style="font-size: 18px; font-weight: 900; color: #064e3b;">MONRESPRO</div>
+            @if(!empty($doc['logo_data_uri']))
+                <img src="{{ $doc['logo_data_uri'] }}" alt="Logo" height="36" style="margin-bottom: 4px;"><br>
+            @elseif(!empty($doc['logo_url']))
+                <img src="{{ $doc['logo_url'] }}" alt="Logo" height="36" style="margin-bottom: 4px;"><br>
+            @else
+                <div style="font-size: 18px; font-weight: 900; color: #064e3b;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
+            @endif
             <div style="font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-top: 2px;">Bon de {{ $type }}</div>
             <div style="margin-top: 6px;"><span class="badge {{ $badgeClass }}">{{ strtoupper($type) }}</span></div>
         </td>

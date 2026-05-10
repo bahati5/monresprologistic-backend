@@ -75,6 +75,8 @@
     <div class="header">
         @if(!empty($doc['logo_data_uri']))
             <img src="{{ $doc['logo_data_uri'] }}" class="logo-img" alt="Logo"><br>
+        @elseif(!empty($doc['logo_url']))
+            <img src="{{ $doc['logo_url'] }}" class="logo-img" alt="Logo"><br>
         @else
             <div style="font-size: 18px; font-weight: 900;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
         @endif

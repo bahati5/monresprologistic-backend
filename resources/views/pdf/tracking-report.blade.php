@@ -28,13 +28,20 @@
     $rp = $shipment->recipientProfile;
     $tracking = $shipment->public_tracking ?? '—';
     $logs = $logs ?? collect([]);
+    $doc = $doc ?? [];
 @endphp
 
 {{-- En-tête --}}
 <table class="header-table">
     <tr>
         <td style="width: 75%;">
-            <div style="font-size: 22px; font-weight: 900; color: #2563eb; margin-bottom: 2px;">MONRESPRO</div>
+            @if(!empty($doc['logo_data_uri']))
+                <img src="{{ $doc['logo_data_uri'] }}" alt="Logo" height="40" style="margin-bottom: 4px;">
+            @elseif(!empty($doc['logo_url']))
+                <img src="{{ $doc['logo_url'] }}" alt="Logo" height="40" style="margin-bottom: 4px;">
+            @else
+                <div style="font-size: 22px; font-weight: 900; color: #2563eb; margin-bottom: 2px;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
+            @endif
             <div style="font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px;">Rapport de suivi d'expédition</div>
             <div style="font-size: 11px; font-weight: 900; color: #1e3a5f; margin-top: 4px;">N° {{ $tracking }}</div>
             <div style="font-size: 9px; color: #64748b; margin-top: 2px;">Généré le {{ now()->format('d/m/Y à H:i') }}</div>

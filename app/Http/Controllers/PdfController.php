@@ -163,9 +163,13 @@ class PdfController extends Controller
             'destCountry',
         ]);
 
+        $doc = ShipmentDocumentSettings::merged();
+        $doc = $this->docForDomPdfLogo($doc);
+
         $pdf = Pdf::loadView('pdf.tracking-report', [
             'shipment' => $shipment,
             'logs'     => $shipment->logs,
+            'doc'      => $doc,
         ]);
         $this->enableRemoteAssets($pdf);
 
@@ -190,10 +194,14 @@ class PdfController extends Controller
             'creator',
         ]);
 
+        $doc = ShipmentDocumentSettings::merged();
+        $doc = $this->docForDomPdfLogo($doc);
+
         $pdf = Pdf::loadView('pdf.delivery-note', [
             'shipment' => $shipment,
             'pickup'   => null,
             'driver'   => $request->user(),
+            'doc'      => $doc,
         ]);
         $this->enableRemoteAssets($pdf);
 
@@ -207,10 +215,14 @@ class PdfController extends Controller
     {
         $pickup->load(['driver', 'shipment.senderProfile', 'shipment.recipientProfile', 'shipment.items']);
 
+        $doc = ShipmentDocumentSettings::merged();
+        $doc = $this->docForDomPdfLogo($doc);
+
         $pdf = Pdf::loadView('pdf.delivery-note', [
             'shipment' => $pickup->shipment ?? null,
             'pickup'   => $pickup,
             'driver'   => $request->user(),
+            'doc'      => $doc,
         ]);
         $this->enableRemoteAssets($pdf);
 

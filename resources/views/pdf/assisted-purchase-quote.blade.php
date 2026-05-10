@@ -160,6 +160,8 @@
         <td style="width:55%">
             @if(!empty($doc['logo_data_uri']))
                 <img src="{{ $doc['logo_data_uri'] }}" alt="" style="max-height:44px;max-width:160px;margin-bottom:8px;">
+            @elseif(!empty($doc['logo_url']))
+                <img src="{{ $doc['logo_url'] }}" alt="" style="max-height:44px;max-width:160px;margin-bottom:8px;">
             @endif
             <p class="brand-name">{{ $site }}</p>
             <div class="brand-meta">

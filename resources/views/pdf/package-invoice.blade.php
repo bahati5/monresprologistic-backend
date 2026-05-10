@@ -39,8 +39,8 @@
 <table class="header-table">
     <tr>
         <td class="logo-cell">
-            @if(!empty($s['logo_url']))
-                <img src="{{ $s['logo_url'] }}" alt="Logo" height="40">
+            @if(!empty($s['logo_data_uri']))
+                <img src="{{ $s['logo_data_uri'] }}" alt="Logo" height="40">
             @else
                 <div style="font-size: 18px; font-weight: 900; color: #2563eb;">{{ $siteName }}</div>
             @endif
