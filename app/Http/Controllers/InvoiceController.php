@@ -29,6 +29,13 @@ class InvoiceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
+
+        if ($user->hasRole('client')) {
+            // Portail : uniquement ses factures
+        } elseif (! $user->can('manage_finances')) {
+            abort(403, 'Liste des factures réservée au pôle finance.');
+        }
+
         $q = Invoice::query()->with(['user', 'shipment', 'extraLines'])->latest();
 
         if ($user->hasRole('client')) {
@@ -69,6 +76,17 @@ class InvoiceController extends Controller
 
         $shipment = Shipment::query()->findOrFail($data['shipment_id']);
         $this->authorize('view', $shipment);
+
+        $lockedStatuses = ['pending', 'paid', 'sent', 'partial', 'overdue'];
+        $hasLockedInvoice = Invoice::query()
+            ->where('shipment_id', $shipment->id)
+            ->whereIn('status', $lockedStatuses)
+            ->exists();
+        if ($hasLockedInvoice) {
+            throw ValidationException::withMessages([
+                'shipment_id' => ['Une facture existe déjà pour cette expédition. Les montants figés ne peuvent pas être modifiés : utilisez un avoir ou une note de crédit.'],
+            ]);
+        }
 
         $billUserId = $shipment->creator_user_id ?? $shipment->senderProfile?->user?->id;
         abort_unless($billUserId, 403, 'Impossible de créer une facture : ce client n\'a pas de compte portail.');
@@ -160,6 +178,7 @@ class InvoiceController extends Controller
                 'invoice_number' => $number,
                 'user_id' => $billUserId,
                 'shipment_id' => $shipment->id,
+                'agency_id' => $shipment->agency_id,
                 'amount' => $finalAmount,
                 'base_amount' => count($linesPayload) > 0 ? $base : null,
                 'currency' => $data['currency'],

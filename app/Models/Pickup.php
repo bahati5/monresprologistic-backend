@@ -11,6 +11,7 @@ class Pickup extends Model
     protected $fillable = [
         'user_id', 'agency_id', 'shipment_id', 'status', 'assigned_driver_id',
         'latitude', 'longitude', 'address_text', 'requested_window', 'completed_at',
+        'completion_photo_path', 'completion_notes', 'failure_reason', 'failure_reason_id',
     ];
 
     protected function casts(): array
@@ -41,5 +42,10 @@ class Pickup extends Model
     public function agency(): BelongsTo
     {
         return $this->belongsTo(Agency::class);
+    }
+
+    public function failureReason(): BelongsTo
+    {
+        return $this->belongsTo(PickupFailureReason::class, 'failure_reason_id');
     }
 }

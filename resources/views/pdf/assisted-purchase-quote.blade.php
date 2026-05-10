@@ -273,6 +273,47 @@
     </tr>
 </table>
 
+<p class="section-label" style="margin-top:18px;">Transparence tarifaire</p>
+<table class="totals" style="width:100%; border:1px solid #e2e2ea; border-radius:8px; padding:10px;">
+    <tr>
+        <td style="text-align:left; width:45%; color:#5c5c6e;">Prix source (devise d'origine)</td>
+        <td style="text-align:right; font-weight:bold;">{{ $present['sourcePriceFormatted'] ?? '—' }}</td>
+    </tr>
+    <tr>
+        <td style="text-align:left; color:#5c5c6e;">Taux appliqué</td>
+        <td style="text-align:right; font-weight:bold;">{{ $present['appliedRateVerbose'] ?? $present['appliedRateLabel'] }}</td>
+    </tr>
+    @if(!empty($present['appliedRateAsOf']))
+    <tr>
+        <td style="text-align:left; color:#5c5c6e;">Taux en vigueur (réf.)</td>
+        <td style="text-align:right; font-weight:bold;">{{ $present['appliedRateAsOf'] }}</td>
+    </tr>
+    @endif
+    <tr>
+        <td style="text-align:left; color:#5c5c6e; vertical-align: top;">Source du taux</td>
+        <td style="text-align:right; font-size: 9pt; color:#333;">{{ $present['appliedRateSourceNote'] ?? '—' }}</td>
+    </tr>
+    <tr>
+        <td style="text-align:left; color:#5c5c6e;">Commission + frais</td>
+        <td style="text-align:right; font-weight:bold;">{{ $present['serviceFeeFormatted'] }} + {{ $present['bankFeeFormatted'] }}</td>
+    </tr>
+    <tr>
+        <td style="text-align:left; color:#5c5c6e;">Total {{ $present['currency'] ?? 'USD' }}</td>
+        <td style="text-align:right; font-weight:bold;">{{ $present['totalFormatted'] }}</td>
+    </tr>
+    <tr>
+        <td style="text-align:left; color:#5c5c6e;">Total CDF</td>
+        <td style="text-align:right; font-weight:bold;">{{ $present['totalCdfFormatted'] ?? '—' }}</td>
+    </tr>
+</table>
+
+@if(!empty($qr_data_uri))
+<div style="text-align:center; margin:18px 0 8px;">
+    <img src="{{ $qr_data_uri }}" alt="QR" width="90" height="90" style="display:inline-block;" />
+    <p style="font-size:8pt; color:#888; margin:4px 0 0;">Scannez pour suivre votre demande</p>
+</div>
+@endif
+
 <div class="footer">
     {{ $site }} — Document généré automatiquement. Pour toute question, contactez-nous aux coordonnées ci-dessus.
 </div>

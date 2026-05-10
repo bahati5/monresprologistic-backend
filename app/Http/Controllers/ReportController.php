@@ -14,9 +14,11 @@ use App\Models\Regroupement;
 use App\Models\Shipment;
 use App\Models\User;
 use Carbon\Carbon;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
@@ -28,21 +30,48 @@ class ReportController extends Controller
      */
     public function summary(Request $request): JsonResponse
     {
+        return response()->json($this->buildSummaryPayload($request));
+    }
+
+    /**
+     * §21 — Export PDF synthèse (même périmètre que GET /reports).
+     */
+    public function summaryPdf(Request $request): Response
+    {
+        $data = $this->buildSummaryPayload($request);
+        $section = (string) $request->input('section', 'shipments');
+        $period = (string) $request->input('period', 'month');
+
+        $pdf = Pdf::loadView('reports.summary-pdf', [
+            'data' => $data,
+            'section' => $section,
+            'period' => $period,
+            'generated_at' => now()->format('d/m/Y H:i'),
+        ])->setPaper('a4', 'portrait');
+
+        $filename = 'monrespro-rapport-'.$section.'-'.now()->format('Y-m-d').'.pdf';
+
+        return $pdf->download($filename);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function buildSummaryPayload(Request $request): array
+    {
         $user = $request->user();
         $section = (string) $request->input('section', 'shipments');
         $period = (string) $request->input('period', 'month');
         [$from, $to] = $this->resolveReportPeriod($period);
         [$pFrom, $pTo] = $this->previousReportPeriod($from, $to);
 
-        $payload = match ($section) {
+        return match ($section) {
             'shipments' => $this->buildShipmentsSummary($user, $from, $to, $pFrom, $pTo),
             'finance' => $this->buildFinanceSummary($user, $from, $to, $pFrom, $pTo),
             'pickups' => $this->buildPickupsSummary($user, $from, $to, $pFrom, $pTo),
             'clients' => $this->buildClientsSummary($user, $from, $to, $pFrom, $pTo),
             default => ['kpis' => [], 'stats' => []],
         };
-
-        return response()->json($payload);
     }
 
     public function shipments(Request $request): JsonResponse
@@ -305,10 +334,11 @@ class ReportController extends Controller
     {
         $q = Shipment::query();
         $this->scopeShipmentsForUser($q, $user);
-        $cur = (clone $q)->whereBetween('created_at', [$from, $to])->count();
-        $prev = (clone $q)->whereBetween('created_at', [$pFrom, $pTo])->count();
-        $weightCur = (clone $q)->whereBetween('created_at', [$from, $to])->sum('weight_kg');
-        $valueCur = (clone $q)->whereBetween('created_at', [$from, $to])->sum('calculated_price');
+        $statsBase = (clone $q)->excludingDrafts();
+        $cur = (clone $statsBase)->whereBetween('created_at', [$from, $to])->count();
+        $prev = (clone $statsBase)->whereBetween('created_at', [$pFrom, $pTo])->count();
+        $weightCur = (clone $statsBase)->whereBetween('created_at', [$from, $to])->sum('weight_kg');
+        $valueCur = (clone $statsBase)->whereBetween('created_at', [$from, $to])->sum('calculated_price');
 
         return [
             'kpis' => [

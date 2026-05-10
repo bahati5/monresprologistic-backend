@@ -11,6 +11,8 @@ class Merchant extends Model
         'name',
         'domains',
         'logo_url',
+        'commission_rate',
+        'estimated_delivery_days',
         'is_active',
         'sort_order',
     ];
@@ -21,6 +23,8 @@ class Merchant extends Model
             'domains' => 'array',
             'is_active' => 'boolean',
             'sort_order' => 'integer',
+            'commission_rate' => 'decimal:2',
+            'estimated_delivery_days' => 'integer',
         ];
     }
 

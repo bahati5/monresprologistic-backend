@@ -73,6 +73,8 @@ class MerchantController extends Controller
             'domains' => [$required, 'array', 'min:1'],
             'domains.*' => ['string', 'max:255'],
             'logo_url' => ['nullable', 'string', 'max:2000'],
+            'commission_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'],
+            'estimated_delivery_days' => ['nullable', 'integer', 'min:1', 'max:365'],
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:65535'],
         ]);

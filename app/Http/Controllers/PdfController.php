@@ -2,15 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Pickup;
 use App\Models\PreAlert;
 use App\Models\Regroupement;
 use App\Models\Setting;
 use App\Models\Shipment;
+use App\Models\User;
 use App\Models\ShippingMode;
 use App\Support\QrCodeHelper;
 use App\Support\ShipmentDocumentSettings;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
 class PdfController extends Controller
@@ -21,6 +24,7 @@ class PdfController extends Controller
     public function previewShipmentLabel(Shipment $shipment): JsonResponse
     {
         $this->authorize('view', $shipment);
+        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentLabelViewData($shipment, true);
         $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
@@ -39,6 +43,7 @@ class PdfController extends Controller
     public function previewShipmentInvoice(Shipment $shipment): JsonResponse
     {
         $this->authorize('view', $shipment);
+        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentInvoiceViewData($shipment, true);
         $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
@@ -54,6 +59,7 @@ class PdfController extends Controller
     public function shipmentInvoice(Shipment $shipment): Response
     {
         $this->authorize('view', $shipment);
+        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentInvoiceViewData($shipment, false);
         $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
@@ -67,6 +73,7 @@ class PdfController extends Controller
     public function shipmentLabel(Shipment $shipment): Response
     {
         $this->authorize('view', $shipment);
+        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentLabelViewData($shipment, false);
         $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
@@ -79,21 +86,59 @@ class PdfController extends Controller
         return $pdf->stream("etiquette-{$shipment->public_tracking}.pdf");
     }
 
+    /**
+     * Digital HTML preview of the shipment form (formulaire d'expédition — distinct from invoice).
+     */
+    public function previewShipmentForm(Shipment $shipment): JsonResponse
+    {
+        $this->authorize('view', $shipment);
+        $this->denyDriverCommercialPrinting();
+
+        $data = $this->shipmentFormViewData($shipment, true);
+        $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
+        $html = view('pdf.shipment-form', $data)->render();
+
+        return response()->json([
+            'html' => $html,
+            'shipment_id' => $shipment->id,
+            'tracking' => $shipment->public_tracking,
+        ]);
+    }
+
+    public function shipmentForm(Shipment $shipment): Response
+    {
+        $this->authorize('view', $shipment);
+        $this->denyDriverCommercialPrinting();
+
+        $data = $this->shipmentFormViewData($shipment, false);
+        $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
+
+        $pdf = Pdf::loadView('pdf.shipment-form', $data);
+        $this->enableRemoteAssets($pdf);
+
+        return $pdf->stream("formulaire-expedition-{$shipment->public_tracking}.pdf");
+    }
+
     public function packageInvoice(PreAlert $preAlert): Response
     {
-        $preAlert->load(['user', 'locker']);
+        $this->denyDriverCommercialPrinting();
+        $preAlert->load(['user', 'locker', 'user.locker']);
 
+        $tracking = (string) ($preAlert->reference_code ?? '');
         $pdf = Pdf::loadView('pdf.package-invoice', [
-            'package' => $preAlert,
-            'settings' => Setting::all()->pluck('value', 'key'),
+            'package'         => $preAlert,
+            'settings'        => Setting::all()->pluck('value', 'key'),
+            'qr_data_uri'     => $tracking ? QrCodeHelper::trackingDataUri($tracking, 90) : null,
+            'barcode_data_uri' => $tracking ? QrCodeHelper::barcodeDataUri($tracking) : null,
         ]);
         $this->enableRemoteAssets($pdf);
 
-        return $pdf->stream("facture-colis-{$preAlert->id}.pdf");
+        return $pdf->stream("recu-depot-{$preAlert->id}.pdf");
     }
 
     public function regroupementDocument(Regroupement $regroupement): Response
     {
+        $this->denyDriverCommercialPrinting();
         $regroupement->load(['agency', 'shipments.senderProfile', 'shipments.recipientProfile']);
 
         $pdf = Pdf::loadView('pdf.regroupement', [
@@ -108,12 +153,19 @@ class PdfController extends Controller
     public function trackingReport(Shipment $shipment): Response
     {
         $this->authorize('view', $shipment);
+        $this->denyDriverCommercialPrinting();
 
-        $shipment->load(['logs' => fn ($q) => $q->with('user')->orderByDesc('created_at'), 'senderProfile', 'recipientProfile']);
+        $shipment->load([
+            'logs' => fn ($q) => $q->with('user')->orderBy('created_at'),
+            'senderProfile',
+            'recipientProfile',
+            'originCountry',
+            'destCountry',
+        ]);
 
         $pdf = Pdf::loadView('pdf.tracking-report', [
             'shipment' => $shipment,
-            'logs' => $shipment->logs,
+            'logs'     => $shipment->logs,
         ]);
         $this->enableRemoteAssets($pdf);
 
@@ -121,11 +173,67 @@ class PdfController extends Controller
     }
 
     /**
+     * Bon de livraison depuis une expédition (§12.2 PRD).
+     */
+    public function deliveryNote(Request $request, Shipment $shipment): Response
+    {
+        $this->authorize('view', $shipment);
+
+        $shipment->load([
+            'senderProfile',
+            'recipientProfile',
+            'recipientProfile.country',
+            'recipientProfile.city',
+            'items',
+            'originCountry',
+            'destCountry',
+            'creator',
+        ]);
+
+        $pdf = Pdf::loadView('pdf.delivery-note', [
+            'shipment' => $shipment,
+            'pickup'   => null,
+            'driver'   => $request->user(),
+        ]);
+        $this->enableRemoteAssets($pdf);
+
+        return $pdf->stream("bon-livraison-{$shipment->public_tracking}.pdf");
+    }
+
+    /**
+     * Bon de livraison depuis une tâche de ramassage/livraison (§12.2 PRD).
+     */
+    public function deliveryNotePickup(Request $request, Pickup $pickup): Response
+    {
+        $pickup->load(['driver', 'shipment.senderProfile', 'shipment.recipientProfile', 'shipment.items']);
+
+        $pdf = Pdf::loadView('pdf.delivery-note', [
+            'shipment' => $pickup->shipment ?? null,
+            'pickup'   => $pickup,
+            'driver'   => $request->user(),
+        ]);
+        $this->enableRemoteAssets($pdf);
+
+        return $pdf->stream("bon-tournee-{$pickup->id}.pdf");
+    }
+
+    /**
      * @return array<string, mixed>
      */
+    /**
+     * §4 PRD — Les chauffeurs n’impriment pas factures / étiquettes / rapports commerciaux (bons de livraison OK).
+     */
+    private function denyDriverCommercialPrinting(): void
+    {
+        $u = auth()->user();
+        if ($u instanceof User && $u->hasRole('driver')) {
+            abort(403, 'Document réservé au personnel habilité.');
+        }
+    }
+
     private function shipmentInvoiceViewData(Shipment $shipment, bool $preview): array
     {
-        $shipment->load(['senderProfile', 'senderProfile.country', 'senderProfile.city', 'recipientProfile', 'recipientProfile.country', 'recipientProfile.city', 'agency', 'status', 'items.originCountry', 'invoices.extraLines', 'creator.locker', 'originCountry', 'destCountry']);
+        $shipment->load(['senderProfile', 'senderProfile.country', 'senderProfile.city', 'recipientProfile', 'recipientProfile.country', 'recipientProfile.city', 'agency', 'items.originCountry', 'invoices.extraLines', 'creator.locker', 'originCountry', 'destCountry']);
 
         $doc = ShipmentDocumentSettings::merged();
         $invoice = $shipment->invoices->first();
@@ -189,7 +297,7 @@ class PdfController extends Controller
      */
     private function shipmentLabelViewData(Shipment $shipment, bool $preview): array
     {
-        $shipment->load(['senderProfile', 'senderProfile.country', 'senderProfile.city', 'recipientProfile', 'recipientProfile.country', 'recipientProfile.city', 'agency', 'status', 'items.originCountry', 'invoices.extraLines', 'creator.locker', 'originCountry', 'destCountry']);
+        $shipment->load(['senderProfile', 'senderProfile.country', 'senderProfile.city', 'recipientProfile', 'recipientProfile.country', 'recipientProfile.city', 'agency', 'items.originCountry', 'invoices.extraLines', 'creator.locker', 'originCountry', 'destCountry']);
 
         $doc = ShipmentDocumentSettings::merged();
         $invoice = $shipment->invoices->first();
@@ -204,6 +312,34 @@ class PdfController extends Controller
             'metrics' => $metrics,
             'logistics' => $logistics,
             'tracking_qr_data_uri' => QrCodeHelper::trackingDataUri($tracking, 220),
+            'tracking_barcode_data_uri' => QrCodeHelper::barcodeDataUri($tracking),
+            'preview' => $preview,
+        ];
+    }
+
+    /**
+     * Data for the standalone shipment form (formulaire d'expédition).
+     */
+    private function shipmentFormViewData(Shipment $shipment, bool $preview): array
+    {
+        $shipment->load([
+            'senderProfile', 'senderProfile.country', 'senderProfile.city', 'senderProfile.state',
+            'recipientProfile', 'recipientProfile.country', 'recipientProfile.city', 'recipientProfile.state',
+            'agency', 'items.originCountry', 'creator', 'originCountry', 'destCountry',
+        ]);
+
+        $doc = ShipmentDocumentSettings::merged();
+        $metrics = $this->lineMetrics($shipment);
+        $logistics = $this->logisticsForPdf($shipment, $doc);
+        $tracking = (string) ($shipment->public_tracking ?? '');
+
+        return [
+            'shipment' => $shipment,
+            'doc' => $doc,
+            'metrics' => $metrics,
+            'logistics' => $logistics,
+            'tracking_qr_data_uri' => QrCodeHelper::trackingDataUri($tracking, 120),
+            'tracking_barcode_data_uri' => QrCodeHelper::barcodeDataUri($tracking),
             'preview' => $preview,
         ];
     }

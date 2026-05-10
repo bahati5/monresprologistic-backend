@@ -34,6 +34,7 @@ class User extends Authenticatable
         'agency_id',
         'theme_preference',
         'can_view_all_agencies',
+        'notification_preferences',
     ];
 
     /**
@@ -57,6 +58,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'can_view_all_agencies' => 'boolean',
+            'notification_preferences' => 'array',
         ];
     }
 

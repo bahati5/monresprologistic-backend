@@ -20,6 +20,10 @@ trait InteractsWithAgencyVisibility
             });
         }
 
+        if ($user->hasRole('driver')) {
+            return $query->where('assigned_driver_id', $user->id);
+        }
+
         if (! $user->canAccessAllAgencies()) {
             return $query->where('agency_id', $user->agency_id);
         }

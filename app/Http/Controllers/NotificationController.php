@@ -67,6 +67,34 @@ class NotificationController extends Controller
     }
 
     /**
+     * §18.5 PRD — Journal d'audit de toutes les notifications envoyées.
+     */
+    public function auditLog(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('manage_notifications'), 403);
+
+        $q = Notification::query()->with('user')->latest();
+
+        if ($request->filled('channel')) {
+            $q->where('type', $request->input('channel'));
+        }
+        if ($request->filled('status')) {
+            $q->where('status', $request->input('status'));
+        }
+        if ($request->filled('user_id')) {
+            $q->where('user_id', (int) $request->input('user_id'));
+        }
+        if ($request->filled('date_from')) {
+            $q->whereDate('created_at', '>=', $request->date('date_from'));
+        }
+        if ($request->filled('date_to')) {
+            $q->whereDate('created_at', '<=', $request->date('date_to'));
+        }
+
+        return response()->json(['notifications' => $q->paginate(30)]);
+    }
+
+    /**
      * Send notification via different channels
      */
     public static function notify(

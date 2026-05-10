@@ -93,12 +93,21 @@ class AssistedPurchaseQuoteMail extends Mailable
             $clientRows = AssistedPurchaseQuotePresentation::clientDetailRows($this->purchase);
             $quotedAt = $this->purchase->quoted_at ?? now();
 
+            $qrDataUri = null;
+            try {
+                $qrDataUri = \App\Support\QrCodeHelper::trackingDataUri(
+                    url("/purchase-orders/{$this->purchase->id}"),
+                    90
+                );
+            } catch (\Throwable) {}
+
             $html = view('pdf.assisted-purchase-quote', [
                 'purchase' => $this->purchase,
                 'present' => $present,
                 'clientRows' => $clientRows,
                 'quotedAtFormatted' => $quotedAt->timezone(config('app.timezone'))->translatedFormat('d F Y'),
                 'accent' => '#3d3d69',
+                'qr_data_uri' => $qrDataUri,
             ])->render();
 
             $binary = Pdf::loadHTML($html)

@@ -111,7 +111,7 @@ class DashboardController extends Controller
                 'stats' => [
                     'pre_alerts' => $preAlertsCount,
                     'purchase_orders' => AssistedPurchase::query()->where('user_id', $user->id)->count(),
-                    'shipments_total' => (clone $shipmentCountQ)->count(),
+                    'shipments_total' => (clone $shipmentCountQ)->excludingDrafts()->count(),
                 ],
             ]);
         }
@@ -183,8 +183,11 @@ class DashboardController extends Controller
         $lastMonthStart = now()->subMonthNoOverflow()->startOfMonth();
         $lastMonthEnd = now()->subMonthNoOverflow()->endOfMonth();
 
-        $shipmentsThisMonth = (clone $shipmentsQ)->where('created_at', '>=', $thisMonth)->count();
-        $shipmentsLastMonth = (clone $shipmentsQ)->whereBetween('created_at', [$lastMonthStart, $lastMonthEnd])->count();
+        /** KPI et graphiques : hors brouillons */
+        $shipmentsStatsQ = (clone $shipmentsQ)->excludingDrafts();
+
+        $shipmentsThisMonth = (clone $shipmentsStatsQ)->where('created_at', '>=', $thisMonth)->count();
+        $shipmentsLastMonth = (clone $shipmentsStatsQ)->whereBetween('created_at', [$lastMonthStart, $lastMonthEnd])->count();
 
         $invBase = $this->scopedInvoices($user);
         $monthlyRevenue = (float) (clone $invBase)->where('status', 'paid')->whereNotNull('paid_at')
@@ -195,7 +198,7 @@ class DashboardController extends Controller
             ->sum('amount');
 
         $stats = [
-            'shipments_total' => (clone $shipmentsQ)->count(),
+            'shipments_total' => (clone $shipmentsStatsQ)->count(),
             'pre_alerts' => $preAlertsPending,
             'pre_alerts_pending' => $preAlertsPending,
             'pickups_count' => $pickupsToday,
@@ -211,8 +214,8 @@ class DashboardController extends Controller
             'dashboard_type' => $dashboardType,
             'stats' => $stats,
             'charts' => [
-                'monthly_evolution' => $this->buildMonthlyEvolution($user, $shipmentsQ),
-                'status_distribution' => $this->buildShipmentStatusDistribution($shipmentsQ),
+                'monthly_evolution' => $this->buildMonthlyEvolution($user, $shipmentsStatsQ),
+                'status_distribution' => $this->buildShipmentStatusDistribution($shipmentsStatsQ),
             ],
             'recent_activity' => $this->buildRecentActivity($shipmentsQ),
             'recent_shipments' => (clone $shipmentsQ)->with(['senderProfile', 'recipientProfile'])->latest()->take(10)->get(),

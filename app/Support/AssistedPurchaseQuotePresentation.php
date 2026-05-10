@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\ExchangeRate;
 use App\Models\AssistedPurchase;
 use App\Models\Setting;
 use App\Models\User;
@@ -23,6 +24,13 @@ final class AssistedPurchaseQuotePresentation
      *   currency: string,
      *   paymentUrl: string,
      *   paymentMethodsNote: ?string,
+     *   sourcePriceFormatted: ?string,
+     *   sourceCurrency: ?string,
+     *   appliedRateLabel: string,
+     *   appliedRateVerbose: string,
+     *   appliedRateSourceNote: string,
+     *   appliedRateAsOf: ?string,
+     *   totalCdfFormatted: ?string,
      *   doc: array<string, mixed>
      * }
      */
@@ -51,6 +59,18 @@ final class AssistedPurchaseQuotePresentation
 
             return $suffix ? $num."\u{a0}".$symbol : $symbol.$num;
         };
+        $fmtWithCurrency = static function (float $n, string $cur) use ($decimals): string {
+            $num = number_format($n, $decimals, ',', ' ');
+            $sym = match (strtoupper($cur)) {
+                'EUR' => '€',
+                'USD' => '$',
+                'GBP' => '£',
+                'CDF' => 'CDF',
+                default => strtoupper($cur),
+            };
+
+            return $sym === 'CDF' ? $num."\u{a0}CDF" : $sym.$num;
+        };
 
         $linesSubtotal = 0.0;
         $rows = [];
@@ -72,6 +92,46 @@ final class AssistedPurchaseQuotePresentation
         $bankBase = $linesSubtotal + $serviceFee;
         $bankFee = $bankBase * ($bankPct / 100.0);
         $total = (float) ($purchase->total_amount ?? $purchase->quote_amount ?? ($linesSubtotal + $serviceFee + $bankFee));
+        $quoteAmount = (float) ($purchase->quote_amount ?? $total);
+
+        $sourceCurrency = $purchase->price_currency ? strtoupper((string) $purchase->price_currency) : null;
+        $sourcePrice = $purchase->price_displayed !== null ? (float) $purchase->price_displayed : null;
+
+        $effectiveRate = 1.0;
+        $tableRateRecord = null;
+        $appliedRateSourceNote = 'Même devise de devis : aucune conversion appliquée.';
+        $appliedRateAsOf = null;
+
+        if ($sourcePrice !== null && $sourcePrice > 0 && $quoteAmount > 0 && $sourceCurrency && strtoupper($currency) !== $sourceCurrency) {
+            $effectiveRate = $quoteAmount / $sourcePrice;
+            $appliedRateSourceNote = 'Taux dérivé du rapport entre le montant TTC du devis et le prix source (fiche produit / extraction), distinct du tableau de change.';
+        } else {
+            $pairFrom = $sourceCurrency ?: strtoupper($currency);
+            $pairTo = strtoupper($currency);
+            $tableRateRecord = ExchangeRate::currentRecord($pairFrom, $pairTo);
+            $stored = $tableRateRecord?->rate !== null ? (float) $tableRateRecord->rate : null;
+            if ($stored !== null && $stored > 0) {
+                $effectiveRate = $stored;
+                $appliedRateSourceNote = 'Taux publié dans le tableau de change de l’application (traçabilité : enregistrement horodaté).';
+                if ($tableRateRecord->valid_from) {
+                    $appliedRateAsOf = $tableRateRecord->valid_from
+                        ->timezone(config('app.timezone'))
+                        ->format('d/m/Y H:i');
+                }
+            } elseif (strtoupper($currency) === strtoupper((string) ($sourceCurrency ?? $currency))) {
+                $appliedRateSourceNote = 'Même devise : aucune conversion.';
+            } else {
+                $appliedRateSourceNote = 'Aucun taux enregistré pour cette paire : le taux affiché est indicatif (1,000000 par défaut).';
+            }
+        }
+
+        $rateLabel = number_format($effectiveRate, 6, ',', ' ');
+        $rateVerbose = ($sourceCurrency && strtoupper($sourceCurrency) !== strtoupper($currency))
+            ? sprintf('1 %s = %s %s', strtoupper($sourceCurrency), $rateLabel, strtoupper($currency))
+            : sprintf('1 %s = 1,000000 %s', strtoupper($currency), strtoupper($currency));
+
+        $cdfRate = ExchangeRate::currentRate(strtoupper($currency), 'CDF');
+        $totalCdf = ($cdfRate !== null && $cdfRate > 0) ? $total * $cdfRate : null;
 
         $user = $purchase->user;
         $rawName = $user ? (is_string($user->name) ? $user->name : (string) $user->name) : '';
@@ -91,6 +151,13 @@ final class AssistedPurchaseQuotePresentation
             'bankFeeFormatted' => $fmt($bankFee),
             'bankFeePercentageLabel' => number_format($bankPct, 2, ',', ' ').' %',
             'totalFormatted' => $fmt($total),
+            'sourcePriceFormatted' => ($sourcePrice !== null && $sourceCurrency) ? $fmtWithCurrency($sourcePrice, $sourceCurrency) : null,
+            'sourceCurrency' => $sourceCurrency,
+            'appliedRateLabel' => $rateLabel,
+            'appliedRateVerbose' => $rateVerbose,
+            'appliedRateSourceNote' => $appliedRateSourceNote,
+            'appliedRateAsOf' => $appliedRateAsOf,
+            'totalCdfFormatted' => $totalCdf !== null ? number_format($totalCdf, 2, ',', ' ')."\u{a0}CDF" : null,
             'currency' => $currency,
             'paymentUrl' => $paymentUrl,
             'paymentMethodsNote' => $paymentMethodsNote,

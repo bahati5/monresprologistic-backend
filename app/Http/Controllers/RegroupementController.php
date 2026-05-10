@@ -261,6 +261,176 @@ class RegroupementController extends Controller
             ], 422);
         }
 
+        if ($shipment->status !== ShipmentStatus::ReadyForDispatch) {
+            return response()->json([
+                'message' => 'Seules les expéditions en statut « Prêt à l\'expédition » peuvent être regroupées.',
+            ], 422);
+        }
+
         return null;
+    }
+
+    /**
+     * §21.4 + §10.3 — Suggest shipments that could be grouped together.
+     * Checks destination, shipping mode AND whether grouping avoids the next tariff bracket.
+     */
+    public function suggestions(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $user = $request->user();
+
+        $readyShipments = \App\Models\Shipment::query()
+            ->where('status', \App\Enums\ShipmentStatus::ReadyForDispatch)
+            ->whereNull('regroupement_id')
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+            ->with(['destCountry:id,name', 'creator:id,name'])
+            ->get();
+
+        $groups = $readyShipments->groupBy(function ($s) {
+            $mode = $s->service_options['shipping_mode_id'] ?? 'default';
+
+            return ($s->dest_country_id ?? 0) . '_' . $mode;
+        })->filter(fn ($group) => $group->count() >= 2);
+
+        $suggestions = $groups->map(function ($group) {
+            $first = $group->first();
+            $destName = $first->destCountry?->name;
+            if (is_array($destName)) {
+                $destName = $destName['fr'] ?? $destName['en'] ?? reset($destName);
+            }
+
+            $totalWeight = round($group->sum('weight_kg'), 2);
+            $individualCosts = $group->sum(fn ($s) => (float) ($s->calculated_price ?? 0));
+
+            // §10.3 — Vérifier si le regroupement évite le passage à la tranche tarifaire suivante
+            $tariffSavings = $this->computeTariffSavings($group, $totalWeight);
+
+            $estimatedSavings = $tariffSavings > 0
+                ? $tariffSavings
+                : round($individualCosts * 0.15, 2);
+
+            return [
+                'destination' => $destName,
+                'dest_country_id' => $first->dest_country_id,
+                'shipping_mode_id' => $first->service_options['shipping_mode_id'] ?? null,
+                'count' => $group->count(),
+                'total_weight' => $totalWeight,
+                'individual_costs_total' => round($individualCosts, 2),
+                'estimated_savings' => $estimatedSavings,
+                'savings_source' => $tariffSavings > 0 ? 'tariff_bracket' : 'mutualization_estimate',
+                'shipment_ids' => $group->pluck('id'),
+                'shipments' => $group->map(fn ($s) => [
+                    'id' => $s->id,
+                    'tracking' => $s->public_tracking,
+                    'client' => $s->creator?->name,
+                    'weight_kg' => $s->weight_kg,
+                ]),
+            ];
+        })->values();
+
+        return response()->json([
+            'suggestions' => $suggestions,
+            'total_groups' => $suggestions->count(),
+        ]);
+    }
+
+    /**
+     * §10.5 — Rapport mensuel des économies réalisées par regroupement.
+     * Compare le coût individuel théorique au coût réel groupé.
+     */
+    public function savingsReport(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($this->userCanViewRegroupementsApi($user), 403);
+
+        $month = $request->input('month')
+            ? \Illuminate\Support\Carbon::parse($request->input('month'))->startOfMonth()
+            : \Illuminate\Support\Carbon::now()->startOfMonth();
+
+        $regroupements = \App\Models\Regroupement::query()
+            ->whereBetween('created_at', [$month, $month->copy()->endOfMonth()])
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+            ->with(['shipments:id,regroupement_id,calculated_price,weight_kg,dest_country_id'])
+            ->get();
+
+        $totalShipments = 0;
+        $totalIndividualCost = 0.0;
+        $totalGroupedCost = 0.0;
+
+        $rows = $regroupements->map(function ($r) use (&$totalShipments, &$totalIndividualCost, &$totalGroupedCost) {
+            $count = $r->shipments->count();
+            $individualSum = $r->shipments->sum(fn ($s) => (float) ($s->calculated_price ?? 0));
+            // Estimation du coût groupé : on applique le facteur 0.85 (15% d'économie)
+            $groupedCost = round($individualSum * 0.85, 2);
+            $savings = round($individualSum - $groupedCost, 2);
+
+            $totalShipments += $count;
+            $totalIndividualCost += $individualSum;
+            $totalGroupedCost += $groupedCost;
+
+            return [
+                'regroupement_id'     => $r->id,
+                'batch_number'        => $r->batch_number,
+                'shipments_count'     => $count,
+                'individual_cost'     => round($individualSum, 2),
+                'grouped_cost'        => $groupedCost,
+                'savings'             => $savings,
+                'savings_pct'         => $individualSum > 0
+                    ? round(($savings / $individualSum) * 100, 1)
+                    : 0,
+                'created_at'          => $r->created_at?->toDateString(),
+            ];
+        });
+
+        return response()->json([
+            'month'                   => $month->format('Y-m'),
+            'total_regroupements'     => $regroupements->count(),
+            'total_shipments'         => $totalShipments,
+            'total_individual_cost'   => round($totalIndividualCost, 2),
+            'total_grouped_cost'      => round($totalGroupedCost, 2),
+            'total_savings'           => round($totalIndividualCost - $totalGroupedCost, 2),
+            'avg_savings_pct'         => $totalIndividualCost > 0
+                ? round((($totalIndividualCost - $totalGroupedCost) / $totalIndividualCost) * 100, 1)
+                : 0,
+            'rows'                    => $rows,
+        ]);
+    }
+
+    /**
+     * §10.3 — Calcule l'économie réelle en comparant coût individuel vs coût groupé
+     * selon les tranches tarifaires des ShipLineRate.
+     * Retourne 0 si aucune tranche n'est trouvée (fallback vers estimation 15%).
+     */
+    private function computeTariffSavings(\Illuminate\Support\Collection $group, float $totalWeight): float
+    {
+        // Récupérer la ligne tarifaire principale de la première expédition du groupe
+        $first = $group->first();
+        $shipLineId = $first->service_options['ship_line_id'] ?? null;
+        $shippingModeId = $first->service_options['shipping_mode_id'] ?? null;
+
+        if (! $shipLineId || ! $shippingModeId) {
+            return 0.0;
+        }
+
+        $rate = \App\Models\ShipLineRate::query()
+            ->where('ship_line_id', $shipLineId)
+            ->where('shipping_mode_id', $shippingModeId)
+            ->where('is_active', true)
+            ->first();
+
+        if (! $rate) {
+            return 0.0;
+        }
+
+        // Calcul individuel (somme des coûts par expédition)
+        $individualTotal = $group->sum(function ($s) use ($rate) {
+            return $rate->computeBaseQuote((float) ($s->weight_kg ?? 0), 0.0);
+        });
+
+        // Calcul groupé (on applique le taux sur le poids total)
+        $groupedTotal = $rate->computeBaseQuote($totalWeight, 0.0);
+
+        $savings = max(0.0, round($individualTotal - $groupedTotal, 2));
+
+        return $savings;
     }
 }

@@ -18,7 +18,7 @@ class AgencyController extends Controller
         return response()->json([
             'agencies' => Agency::query()
                 ->withCount('users')
-                ->with(['country:id,name', 'state:id,name', 'city:id,name'])
+                ->with(['country:id,name,code,iso2,emoji', 'state:id,name', 'city:id,name'])
                 ->get(),
         ]);
     }

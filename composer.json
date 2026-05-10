@@ -62,6 +62,10 @@
         "dev": [
             "Composer\\Config::disableProcessTimeout",
             "npx concurrently -c \"#93c5fd,#c4b5fd,#fdba74\" \"php -d max_execution_time=0 artisan serve\" \"php artisan queue:work --tries=1 --sleep=3\" \"npm run dev\" --names=server,queue,vite"
+        ],
+        "serve": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php -d max_execution_time=0 artisan serve"
         ]
     },
     "extra": {

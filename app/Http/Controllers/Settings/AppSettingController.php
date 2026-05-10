@@ -37,6 +37,8 @@ class AppSettingController extends Controller
         'tracking_prefix', 'tracking_number_length',
         'shipment_tracking_format', 'shipment_tracking_next_seq', 'shipment_tracking_seq_pad',
         'volumetric_divisor',
+        'billable_weight_rule',
+        'draft_shipment_expiry_days',
         'default_insurance_pct', 'default_customs_duty_pct', 'default_tax_pct',
         'shipment_invoice_format', 'shipment_invoice_prefix', 'shipment_invoice_seq_pad', 'shipment_invoice_next_seq',
     ];
@@ -48,11 +50,28 @@ class AppSettingController extends Controller
         'customer_package_reference_format', 'customer_package_reference_prefix', 'customer_package_reference_seq_pad', 'customer_package_next_seq',
     ];
 
-    /** Autres clés métier présentes en base (documents, etc.) — pour ne pas les « perdre » côté UI. */
+    private const DRAFT_KEYS = [
+        'draft_max_per_type',
+        'draft_client_expiry_days',
+        'draft_staff_expiry_days',
+        'draft_autosave_interval_seconds',
+    ];
+
+    private const WORKFLOW_KEYS = [
+        'quote_expiry_hours',
+        'prealert_expiry_days',
+        'weight_discrepancy_threshold_pct',
+        'sav_response_target_hours',
+        'refund_threshold_operator',
+        'refund_threshold_agency_admin',
+        'default_quote_currency',
+    ];
+
     private const EXTRA_APP_KEYS = [
         'invoice_terms', 'signing_company', 'signing_customer',
         'default_company_coverage_amount',
         'show_sidebar_brand_with_logo',
+        'odoo_invoice_sync_trigger',
     ];
 
     /**
@@ -75,6 +94,8 @@ class AppSettingController extends Controller
             self::GENERAL_KEYS,
             self::SHIPMENT_CONFIG_KEYS,
             self::NUMBERING_KEYS,
+            self::WORKFLOW_KEYS,
+            self::DRAFT_KEYS,
             self::EXTRA_APP_KEYS,
             ['hub_brand_name']
         ));
@@ -164,6 +185,8 @@ class AppSettingController extends Controller
             'shipment_tracking_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
             'shipment_tracking_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
             'volumetric_divisor' => ['nullable', 'integer', 'min:1', 'max:99999'],
+            'billable_weight_rule' => ['nullable', 'string', 'in:max,min,real,volumetric'],
+            'draft_shipment_expiry_days' => ['nullable', 'integer', 'min:1', 'max:365'],
             'default_insurance_pct' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'default_customs_duty_pct' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'default_tax_pct' => ['nullable', 'numeric', 'min:0', 'max:100'],
@@ -192,6 +215,18 @@ class AppSettingController extends Controller
             'signing_customer' => ['nullable', 'string', 'max:255'],
             'default_company_coverage_amount' => ['nullable', 'numeric', 'min:0'],
             'show_sidebar_brand_with_logo' => ['nullable', 'string', 'in:0,1'],
+            'odoo_invoice_sync_trigger' => ['nullable', 'string', 'in:on_delivered,on_invoice_accounting'],
+            'quote_expiry_hours' => ['nullable', 'integer', 'min:1', 'max:720'],
+            'prealert_expiry_days' => ['nullable', 'integer', 'min:1', 'max:365'],
+            'weight_discrepancy_threshold_pct' => ['nullable', 'numeric', 'min:1', 'max:100'],
+            'sav_response_target_hours' => ['nullable', 'integer', 'min:1', 'max:720'],
+            'refund_threshold_operator' => ['nullable', 'numeric', 'min:0'],
+            'refund_threshold_agency_admin' => ['nullable', 'numeric', 'min:0'],
+            'default_quote_currency' => ['nullable', 'string', 'max:8'],
+            'draft_max_per_type' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'draft_client_expiry_days' => ['nullable', 'integer', 'min:1', 'max:365'],
+            'draft_staff_expiry_days' => ['nullable', 'integer', 'min:1', 'max:365'],
+            'draft_autosave_interval_seconds' => ['nullable', 'integer', 'min:5', 'max:300'],
         ]);
 
         if (! empty($data['city_id'] ?? null)) {

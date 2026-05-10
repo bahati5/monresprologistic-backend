@@ -11,6 +11,7 @@ use App\Http\Controllers\CustomerPackageController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DriverController;
 use App\Http\Controllers\FinanceDashboardController;
+use App\Http\Controllers\FormDraftController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\LedgerController;
 use App\Http\Controllers\LockerController;
@@ -21,7 +22,7 @@ use App\Http\Controllers\PaymentProofController;
 use App\Http\Controllers\PdfController;
 use App\Http\Controllers\PickupController;
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\PurchaseOrderController;
+use App\Http\Controllers\RefundController;
 use App\Http\Controllers\RegroupementController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SectionDashboardController;
@@ -42,6 +43,8 @@ use App\Http\Controllers\Settings\ShippingModeController;
 use App\Http\Controllers\Settings\SmtpConfigController;
 use App\Http\Controllers\Settings\TransportCompanyController;
 use App\Http\Controllers\Settings\TwilioConfigController;
+use App\Http\Controllers\Settings\PickupFailureReasonController;
+use App\Http\Controllers\Settings\RolePermissionController;
 use App\Http\Controllers\Settings\ZoneController;
 use App\Http\Controllers\ShipmentController;
 use App\Http\Controllers\ShipmentNoticeController;
@@ -70,6 +73,8 @@ Route::get('/locations/timezones', [LocationCascadeController::class, 'timezones
 Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
     Route::post('register', [AuthController::class, 'register']);
+    Route::post('forgot-password', [\App\Http\Controllers\Auth\PasswordResetLinkController::class, 'store']);
+    Route::post('reset-password', [\App\Http\Controllers\Auth\NewPasswordController::class, 'store']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('user', [AuthController::class, 'user']);
@@ -93,6 +98,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('dashboard/regroupements', [SectionDashboardController::class, 'regroupements']);
     Route::get('dashboard/crm', [SectionDashboardController::class, 'crm']);
     Route::get('dashboard/reports', [SectionDashboardController::class, 'reports']);
+    Route::get('dashboard/analytics', [\App\Http\Controllers\AnalyticsDashboardController::class, 'analytics'])->middleware('permission:view_analytics');
+    Route::get('dashboard/overdue', [\App\Http\Controllers\AnalyticsDashboardController::class, 'overdue'])->middleware('permission:view_analytics');
+
+    // --- Form Drafts ---
+    Route::apiResource('drafts', FormDraftController::class)
+        ->only(['index', 'store', 'show', 'update', 'destroy']);
+
+    // --- Client Portal ---
+    Route::prefix('client')->group(function () {
+        Route::get('dashboard', [\App\Http\Controllers\ClientPortalController::class, 'dashboard']);
+        Route::get('locker', [\App\Http\Controllers\ClientPortalController::class, 'locker']);
+        Route::get('invoices', [\App\Http\Controllers\ClientPortalController::class, 'invoices']);
+        Route::get('notification-preferences', [\App\Http\Controllers\ClientPortalController::class, 'notificationPreferences']);
+        Route::patch('notification-preferences', [\App\Http\Controllers\ClientPortalController::class, 'updateNotificationPreferences']);
+    });
 
     // --- Profile & Theme ---
     Route::get('profile', [ProfileController::class, 'show']);
@@ -132,30 +152,33 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('permission:manage_assisted_purchases');
     Route::post('assisted-purchases/{assisted_purchase}/mark-paid', [AssistedPurchaseController::class, 'markPaid'])
         ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/publish-payment-request', [AssistedPurchaseController::class, 'publishPaymentRequest'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/reject-payment-proof', [AssistedPurchaseController::class, 'rejectPaymentProof'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/update-status', [AssistedPurchaseController::class, 'updateStatus'])
+        ->middleware('permission:manage_assisted_purchases');
     Route::post('assisted-purchases/{assisted_purchase}/client-payment-ack', [AssistedPurchaseController::class, 'clientPaymentAck']);
     Route::get('assisted-purchases/{assisted_purchase}/payment-proof', [AssistedPurchaseController::class, 'downloadPaymentProof']);
+    Route::post('assisted-purchases/extract-product', [AssistedPurchaseController::class, 'extractProduct']);
+    Route::get('assisted-purchases/extract-product/{cacheKey}', [AssistedPurchaseController::class, 'extractProductResult']);
     Route::post('assisted-purchases/{assisted_purchase}/convert-to-shipment', [AssistedPurchaseController::class, 'convertToShipment'])
         ->middleware('permission:manage_assisted_purchases');
-
-    // --- Purchase Orders ---
-    Route::apiResource('purchase-orders', PurchaseOrderController::class)
-        ->parameters(['purchase-orders' => 'purchaseOrder:id']);
-    Route::post('purchase-orders/{purchaseOrder}/quote', [PurchaseOrderController::class, 'quote']);
-    Route::post('purchase-orders/{purchaseOrder}/mark-paid', [PurchaseOrderController::class, 'markPaid']);
-    Route::post('purchase-orders/{purchaseOrder}/mark-purchased', [PurchaseOrderController::class, 'markPurchased']);
-    Route::post('purchase-orders/{purchaseOrder}/convert', [PurchaseOrderController::class, 'convert']);
 
     // --- Shipments ---
     Route::get('shipments', [ShipmentController::class, 'index']);
     Route::get('shipments/create', [ShipmentController::class, 'create']);
     Route::get('shipments/assignable-drivers', [ShipmentController::class, 'assignableDrivers']);
     Route::post('shipments', [ShipmentController::class, 'store']);
+    Route::patch('shipments/{shipment}', [ShipmentController::class, 'update']);
+    Route::post('shipments/{shipment}/duplicate', [ShipmentController::class, 'duplicate']);
     Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
     Route::post('shipments/preview-quote', [ShipmentController::class, 'previewQuote']);
     Route::post('shipments/{shipment}/assign-driver', [ShipmentController::class, 'assignDriver']);
     Route::post('shipments/{shipment}/accept', [ShipmentController::class, 'accept']);
     Route::post('shipments/{shipment}/update-status', [ShipmentController::class, 'updateStatus']);
     Route::post('shipments/{shipment}/deliver', [ShipmentController::class, 'deliver']);
+    Route::post('shipments/{shipment}/archive-signed-form', [ShipmentController::class, 'archiveSignedForm']);
     Route::post('shipments/{shipment}/record-payment', [ShipmentController::class, 'recordPayment']);
     Route::patch('shipments/{shipment}/invoice-options', [ShipmentController::class, 'updateInvoiceOptions']);
 
@@ -180,6 +203,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Regroupements (| = OU Spatie : compat. noms legacy view/create/manage_consolidations)
     Route::get('regroupements', [RegroupementController::class, 'index'])->middleware('permission:view_regroupements|view_consolidations|manage_regroupements|manage_consolidations');
+    Route::get('regroupements/suggestions', [RegroupementController::class, 'suggestions'])->middleware('permission:create_regroupements|manage_regroupements');
     Route::post('regroupements', [RegroupementController::class, 'store'])->middleware('permission:create_regroupements|create_consolidations|manage_regroupements|manage_consolidations');
     Route::post('regroupements/{regroupement}/shipments', [RegroupementController::class, 'attachShipment'])->middleware('permission:create_regroupements|create_consolidations|manage_regroupements|manage_consolidations');
     Route::post('regroupements/{regroupement}/attach-shipments', [RegroupementController::class, 'attachShipments'])->middleware('permission:create_regroupements|create_consolidations|manage_regroupements|manage_consolidations');
@@ -190,6 +214,30 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('pickups', [PickupController::class, 'store']);
     Route::post('pickups/{pickup}/assign', [PickupController::class, 'assign'])->middleware('permission:assign_drivers');
     Route::post('pickups/{pickup}/update-status', [PickupController::class, 'updateStatus']);
+    Route::post('pickups/{pickup}/completion-photo', [PickupController::class, 'uploadCompletionPhoto']);
+    Route::get('pickup-failure-reasons', [PickupFailureReasonController::class, 'indexForOperations']);
+
+    // --- Comments ---
+    Route::get('comments', [\App\Http\Controllers\CommentController::class, 'index']);
+    Route::post('comments', [\App\Http\Controllers\CommentController::class, 'store']);
+    Route::delete('comments/{comment}', [\App\Http\Controllers\CommentController::class, 'destroy']);
+
+    // --- Devises (conversion indicative, lecture taux en base) ---
+    Route::post('currency/convert', [\App\Http\Controllers\CurrencyController::class, 'convert']);
+
+    /** Reprise file hors-ligne (PRD ERR-01) */
+    Route::post('sync/offline-queue', [\App\Http\Controllers\OfflineSyncController::class, 'processQueue']);
+
+    // --- Refunds ---
+    Route::get('refunds', [RefundController::class, 'index']);
+    Route::get('refunds/export', [RefundController::class, 'export']);
+    Route::post('refunds', [RefundController::class, 'store']);
+    Route::get('refunds/{refund}', [RefundController::class, 'show']);
+    Route::get('refunds/{refund}/request-proof', [RefundController::class, 'downloadRequestProof']);
+    Route::post('refunds/{refund}/approve', [RefundController::class, 'approve'])->middleware('permission:approve_refunds');
+    Route::post('refunds/{refund}/reject', [RefundController::class, 'reject'])->middleware('permission:approve_refunds');
+    Route::post('refunds/{refund}/process', [RefundController::class, 'process'])->middleware('permission:manage_refunds');
+    Route::post('refunds/{refund}/complete', [RefundController::class, 'complete'])->middleware('permission:manage_refunds');
 
     // --- Finance ---
     Route::get('finance/dashboard', FinanceDashboardController::class)->middleware('permission:manage_finances');
@@ -201,7 +249,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('finance/payment-proofs', [PaymentProofController::class, 'store']);
     Route::post('finance/payment-proofs/{payment_proof}/approve', [PaymentProofController::class, 'approve'])->middleware('permission:approve_payments');
     Route::post('finance/payment-proofs/{payment_proof}/reject', [PaymentProofController::class, 'reject'])->middleware('permission:approve_payments');
-    Route::get('finance/ledger', LedgerController::class)->middleware('permission:manage_finances');
+    Route::get('finance/ledger', [LedgerController::class, 'index'])->middleware('permission:manage_finances');
+    Route::get('finance/ledger/export', [LedgerController::class, 'export'])->middleware('permission:manage_finances');
 
     // --- Reports ---
     Route::prefix('reports')->name('reports.')->middleware('permission:view_reports')->group(function () {
@@ -214,6 +263,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('export/shipments', [ReportController::class, 'exportShipments']);
         Route::get('export/pickups', [ReportController::class, 'exportPickups']);
         Route::get('export/finance', [ReportController::class, 'exportFinance']);
+        Route::get('summary/pdf', [ReportController::class, 'summaryPdf']);
     });
 
     // --- Clients (Profile-based) ---
@@ -225,6 +275,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('clients/{client}', [ClientController::class, 'update']);
         Route::post('clients/{client}/toggle-active', [ClientController::class, 'toggleActive']);
         Route::post('clients/{client}/create-portal', [ClientController::class, 'createPortal']);
+        Route::post('clients/check-duplicates', [ClientController::class, 'checkDuplicates']);
     });
 
     // --- Address Book (replaces Recipients) ---
@@ -254,6 +305,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
     Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead']);
     Route::delete('notifications/{notification}', [NotificationController::class, 'destroy']);
+    Route::get('notifications/audit-log', [NotificationController::class, 'auditLog']);
 
     // --- Newsletter (admin) ---
     Route::middleware('permission:manage_newsletter')->group(function () {
@@ -264,12 +316,33 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- PDF ---
     Route::get('shipments/{shipment}/pdf/invoice', [PdfController::class, 'shipmentInvoice']);
     Route::get('shipments/{shipment}/pdf/label', [PdfController::class, 'shipmentLabel']);
+    Route::get('shipments/{shipment}/pdf/form', [PdfController::class, 'shipmentForm']);
     Route::get('shipments/{shipment}/preview/invoice', [PdfController::class, 'previewShipmentInvoice']);
     Route::get('shipments/{shipment}/preview/label', [PdfController::class, 'previewShipmentLabel']);
+    Route::get('shipments/{shipment}/preview/form', [PdfController::class, 'previewShipmentForm']);
     Route::get('shipments/{shipment}/pdf/tracking', [PdfController::class, 'trackingReport']);
+    Route::get('shipments/{shipment}/pdf/delivery-note', [PdfController::class, 'deliveryNote']);
+    Route::get('pickups/{pickup}/pdf/delivery-note', [PdfController::class, 'deliveryNotePickup']);
     Route::get('packages/{preAlert}/pdf/invoice', [PdfController::class, 'packageInvoice']);
 
-    // --- Backup ---
+    // --- FlexPay phase 2 ---
+    Route::prefix('flexpay')->group(function () {
+        Route::post('initiate', [\App\Http\Controllers\FlexPayController::class, 'initiatePayment']);
+        Route::get('check/{orderNumber}', [\App\Http\Controllers\FlexPayController::class, 'checkStatus']);
+    });
+
+    // §21.6 — Impression directe réseau
+    Route::prefix('print')->group(function () {
+        Route::get('status', [\App\Http\Controllers\NetworkPrintController::class, 'status']);
+        Route::post('shipments/{shipment}/label', [\App\Http\Controllers\NetworkPrintController::class, 'printShipmentLabel']);
+    });
+
+    // §10.5 — Rapport économies regroupement
+    Route::get('regroupements/savings-report', [RegroupementController::class, 'savingsReport']);
+
+    // §19 — Analytics : taux de conversion des devis achat assisté
+    Route::get('analytics/quote-conversion', [\App\Http\Controllers\AnalyticsController::class, 'quoteConversion'])
+        ->middleware('permission:view_reports');
     Route::middleware('permission:manage_backups')->group(function () {
         Route::get('backup/download', [BackupController::class, 'download']);
         Route::get('backup/tables', [BackupController::class, 'tables']);
@@ -277,18 +350,41 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // --- Settings ---
-    Route::prefix('settings')->middleware('permission:manage_settings')->group(function () {
-        Route::get('/', SettingsHubController::class);
+    Route::prefix('settings')->group(function () {
+        Route::get('/', SettingsHubController::class)->middleware('permission:manage_settings|manage_pricing|manage_agencies|manage_notifications|manage_statuses');
 
-        Route::get('app', [AppSettingController::class, 'edit']);
-        Route::put('app', [AppSettingController::class, 'update']);
-        Route::post('app/logo', [AppSettingController::class, 'uploadLogo']);
-        Route::post('app/favicon', [AppSettingController::class, 'uploadFavicon']);
+        // System-level settings: super_admin only (manage_settings)
+        Route::middleware('permission:manage_settings')->group(function () {
+            Route::get('app', [AppSettingController::class, 'edit']);
+            Route::put('app', [AppSettingController::class, 'update']);
+            Route::post('app/logo', [AppSettingController::class, 'uploadLogo']);
+            Route::post('app/favicon', [AppSettingController::class, 'uploadFavicon']);
 
+            Route::get('payment-methods', [PaymentMethodController::class, 'index']);
+            Route::post('payment-methods', [PaymentMethodController::class, 'store']);
+            Route::delete('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'destroy']);
+
+            Route::get('payment-gateways', [PaymentGatewayController::class, 'index']);
+            Route::put('payment-gateways', [PaymentGatewayController::class, 'update']);
+
+            Route::get('smtp-config', [SmtpConfigController::class, 'index']);
+            Route::put('smtp-config', [SmtpConfigController::class, 'update']);
+            Route::post('smtp-config/test', [SmtpConfigController::class, 'test']);
+
+            Route::get('twilio-config', [TwilioConfigController::class, 'index']);
+            Route::put('twilio-config', [TwilioConfigController::class, 'update']);
+            Route::post('twilio-config/test', [TwilioConfigController::class, 'test']);
+        });
+
+        // Operational settings: agency_admin + super_admin
         Route::middleware('permission:manage_agencies')->group(function () {
             Route::get('agencies', [AgencyController::class, 'index']);
             Route::post('agencies', [AgencyController::class, 'store']);
             Route::patch('agencies/{agency}', [AgencyController::class, 'update']);
+
+            Route::get('agency-payment-coordinates', [AgencyPaymentCoordinateController::class, 'index']);
+            Route::post('agency-payment-coordinates', [AgencyPaymentCoordinateController::class, 'store']);
+            Route::delete('agency-payment-coordinates/{agencyPaymentCoordinate}', [AgencyPaymentCoordinateController::class, 'destroy']);
         });
 
         Route::middleware('permission:manage_pricing')->group(function () {
@@ -299,6 +395,51 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('zones', [ZoneController::class, 'index']);
             Route::post('zones', [ZoneController::class, 'store']);
             Route::delete('zones/{zone}', [ZoneController::class, 'destroy']);
+
+            Route::get('billing-extras', [BillingExtraController::class, 'index']);
+            Route::post('billing-extras', [BillingExtraController::class, 'store']);
+            Route::patch('billing-extras/{billingExtra}', [BillingExtraController::class, 'update']);
+            Route::delete('billing-extras/{billingExtra}', [BillingExtraController::class, 'destroy']);
+
+            Route::get('shipping-modes', [ShippingModeController::class, 'index']);
+            Route::post('shipping-modes', [ShippingModeController::class, 'store']);
+            Route::patch('shipping-modes/{shippingMode}', [ShippingModeController::class, 'update']);
+            Route::delete('shipping-modes/{shippingMode}', [ShippingModeController::class, 'destroy']);
+
+            Route::get('packaging-types', [PackagingTypeController::class, 'index']);
+            Route::post('packaging-types', [PackagingTypeController::class, 'store']);
+            Route::patch('packaging-types/{packagingType}', [PackagingTypeController::class, 'update']);
+            Route::delete('packaging-types/{packagingType}', [PackagingTypeController::class, 'destroy']);
+
+            Route::get('article-categories', [ArticleCategoryController::class, 'index']);
+            Route::post('article-categories', [ArticleCategoryController::class, 'store']);
+            Route::patch('article-categories/{articleCategory}', [ArticleCategoryController::class, 'update']);
+            Route::delete('article-categories/{articleCategory}', [ArticleCategoryController::class, 'destroy']);
+
+            Route::get('transport-companies', [TransportCompanyController::class, 'index']);
+            Route::post('transport-companies', [TransportCompanyController::class, 'store']);
+            Route::patch('transport-companies/{transportCompany}', [TransportCompanyController::class, 'update']);
+            Route::delete('transport-companies/{transportCompany}', [TransportCompanyController::class, 'destroy']);
+
+            Route::get('locations', [LocationController::class, 'index']);
+            Route::post('locations/countries', [LocationController::class, 'storeCountry']);
+            Route::delete('locations/countries/{country}', [LocationController::class, 'destroyCountry']);
+            Route::post('locations/states', [LocationController::class, 'storeState']);
+            Route::delete('locations/states/{state}', [LocationController::class, 'destroyState']);
+            Route::post('locations/cities', [LocationController::class, 'storeCity']);
+            Route::delete('locations/cities/{city}', [LocationController::class, 'destroyCity']);
+
+            Route::get('ship-lines', [ShipLineController::class, 'index']);
+            Route::get('ship-lines/for-route', [ShipLineController::class, 'forRoute']);
+            Route::post('ship-lines/merge-route', [ShipLineController::class, 'mergeRoute']);
+            Route::post('ship-lines', [ShipLineController::class, 'store']);
+            Route::patch('ship-lines/{shipLine}', [ShipLineController::class, 'update']);
+            Route::delete('ship-lines/{shipLine}', [ShipLineController::class, 'destroy']);
+
+            Route::get('exchange-rates', [\App\Http\Controllers\Settings\ExchangeRateController::class, 'index'])
+                ->middleware('permission:manage_exchange_rates');
+            Route::post('exchange-rates', [\App\Http\Controllers\Settings\ExchangeRateController::class, 'store'])
+                ->middleware('permission:manage_exchange_rates');
         });
 
         Route::middleware('permission:manage_notifications')->group(function () {
@@ -307,71 +448,33 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::patch('notifications/{notificationTemplate}', [NotificationTemplateController::class, 'update']);
         });
 
-        // Public read access for payment methods (needed for checkout)
-        Route::get('payment-methods', [PaymentMethodController::class, 'index']);
-        Route::post('payment-methods', [PaymentMethodController::class, 'store'])->middleware('permission:manage_settings');
-        Route::delete('payment-methods/{paymentMethod}', [PaymentMethodController::class, 'destroy'])->middleware('permission:manage_settings');
+        Route::middleware('permission:manage_assisted_purchases')->group(function () {
+            Route::get('merchants', [MerchantController::class, 'index']);
+            Route::post('merchants', [MerchantController::class, 'store']);
+            Route::patch('merchants/{merchant}', [MerchantController::class, 'update']);
+            Route::delete('merchants/{merchant}', [MerchantController::class, 'destroy']);
+        });
 
-        Route::get('billing-extras', [BillingExtraController::class, 'index']);
-        Route::post('billing-extras', [BillingExtraController::class, 'store']);
-        Route::patch('billing-extras/{billingExtra}', [BillingExtraController::class, 'update']);
-        Route::delete('billing-extras/{billingExtra}', [BillingExtraController::class, 'destroy']);
+        Route::middleware('permission:manage_settings')->group(function () {
+            Route::get('sync-errors', [\App\Http\Controllers\Settings\SyncErrorController::class, 'index']);
+            Route::post('sync-errors/{syncError}/retry', [\App\Http\Controllers\Settings\SyncErrorController::class, 'retry']);
+            Route::post('sync-errors/{syncError}/resolve', [\App\Http\Controllers\Settings\SyncErrorController::class, 'resolve']);
 
-        Route::get('shipping-modes', [ShippingModeController::class, 'index']);
-        Route::post('shipping-modes', [ShippingModeController::class, 'store']);
-        Route::patch('shipping-modes/{shippingMode}', [ShippingModeController::class, 'update']);
-        Route::delete('shipping-modes/{shippingMode}', [ShippingModeController::class, 'destroy']);
+            Route::get('pickup-failure-reasons', [PickupFailureReasonController::class, 'index']);
+            Route::post('pickup-failure-reasons', [PickupFailureReasonController::class, 'store']);
+            Route::patch('pickup-failure-reasons/{pickupFailureReason}', [PickupFailureReasonController::class, 'update']);
+            Route::delete('pickup-failure-reasons/{pickupFailureReason}', [PickupFailureReasonController::class, 'destroy']);
+        });
 
-        Route::get('packaging-types', [PackagingTypeController::class, 'index']);
-        Route::post('packaging-types', [PackagingTypeController::class, 'store']);
-        Route::patch('packaging-types/{packagingType}', [PackagingTypeController::class, 'update']);
-        Route::delete('packaging-types/{packagingType}', [PackagingTypeController::class, 'destroy']);
-
-        Route::get('article-categories', [ArticleCategoryController::class, 'index']);
-        Route::post('article-categories', [ArticleCategoryController::class, 'store']);
-        Route::patch('article-categories/{articleCategory}', [ArticleCategoryController::class, 'update']);
-        Route::delete('article-categories/{articleCategory}', [ArticleCategoryController::class, 'destroy']);
-
-        Route::get('transport-companies', [TransportCompanyController::class, 'index']);
-        Route::post('transport-companies', [TransportCompanyController::class, 'store']);
-        Route::patch('transport-companies/{transportCompany}', [TransportCompanyController::class, 'update']);
-        Route::delete('transport-companies/{transportCompany}', [TransportCompanyController::class, 'destroy']);
-
-        Route::get('locations', [LocationController::class, 'index']);
-        Route::post('locations/countries', [LocationController::class, 'storeCountry']);
-        Route::delete('locations/countries/{country}', [LocationController::class, 'destroyCountry']);
-        Route::post('locations/states', [LocationController::class, 'storeState']);
-        Route::delete('locations/states/{state}', [LocationController::class, 'destroyState']);
-        Route::post('locations/cities', [LocationController::class, 'storeCity']);
-        Route::delete('locations/cities/{city}', [LocationController::class, 'destroyCity']);
-
-        Route::get('ship-lines', [ShipLineController::class, 'index']);
-        Route::get('ship-lines/for-route', [ShipLineController::class, 'forRoute']);
-        Route::post('ship-lines/merge-route', [ShipLineController::class, 'mergeRoute']);
-        Route::post('ship-lines', [ShipLineController::class, 'store']);
-        Route::patch('ship-lines/{shipLine}', [ShipLineController::class, 'update']);
-        Route::delete('ship-lines/{shipLine}', [ShipLineController::class, 'destroy']);
-
-        // Public read access for payment gateways (needed for checkout)
-        Route::get('payment-gateways', [PaymentGatewayController::class, 'index']);
-        Route::put('payment-gateways', [PaymentGatewayController::class, 'update'])->middleware('permission:manage_settings');
-
-        Route::get('agency-payment-coordinates', [AgencyPaymentCoordinateController::class, 'index']);
-        Route::post('agency-payment-coordinates', [AgencyPaymentCoordinateController::class, 'store']);
-        Route::delete('agency-payment-coordinates/{agencyPaymentCoordinate}', [AgencyPaymentCoordinateController::class, 'destroy']);
-
-        Route::get('smtp-config', [SmtpConfigController::class, 'index']);
-        Route::put('smtp-config', [SmtpConfigController::class, 'update']);
-        Route::post('smtp-config/test', [SmtpConfigController::class, 'test']);
-
-        Route::get('twilio-config', [TwilioConfigController::class, 'index']);
-        Route::put('twilio-config', [TwilioConfigController::class, 'update']);
-        Route::post('twilio-config/test', [TwilioConfigController::class, 'test']);
-
-        Route::get('merchants', [MerchantController::class, 'index']);
-        Route::post('merchants', [MerchantController::class, 'store']);
-        Route::patch('merchants/{merchant}', [MerchantController::class, 'update']);
-        Route::delete('merchants/{merchant}', [MerchantController::class, 'destroy']);
+        Route::middleware('permission:manage_roles')->group(function () {
+            Route::get('roles-permissions', [RolePermissionController::class, 'index']);
+            Route::put('roles/{role}', [RolePermissionController::class, 'updateRole']);
+            Route::post('roles', [RolePermissionController::class, 'storeRole']);
+            Route::delete('roles/{role}', [RolePermissionController::class, 'destroyRole']);
+            Route::post('permissions', [RolePermissionController::class, 'storePermission']);
+            Route::get('users/{user}/permissions', [RolePermissionController::class, 'userPermissions']);
+            Route::put('users/{user}/permissions', [RolePermissionController::class, 'updateUserPermissions']);
+        });
     });
 });
 
@@ -380,5 +483,18 @@ Route::middleware('auth:sanctum')->group(function () {
 | Public routes (no auth)
 |--------------------------------------------------------------------------
 */
+Route::get('track/{trackingNumber}', [\App\Http\Controllers\TrackingController::class, 'apiTrack']);
+Route::post('track-events', [\App\Http\Controllers\TrackEventController::class, 'store'])->middleware('throttle:120,1');
+Route::post('webhooks/flexpay', [\App\Http\Controllers\WebhookController::class, 'flexpay']);
+
+// §17 — Widget WordPress : endpoint public de suivi embeddable
+Route::get('widget/track/{trackingNumber}', [\App\Http\Controllers\TrackingController::class, 'widgetTrack']);
+
+// §17 — Formulaires WordPress publics (achat assisté + pré-alerte)
+Route::middleware('throttle:30,1')->group(function () {
+    Route::post('widget/assisted-purchase', [\App\Http\Controllers\WordPressFormController::class, 'createAssistedPurchase']);
+    Route::post('widget/pre-alert', [\App\Http\Controllers\WordPressFormController::class, 'createPreAlert']);
+});
+
 Route::post('newsletter/subscribe', [NewsletterController::class, 'subscribe']);
 Route::post('newsletter/unsubscribe', [NewsletterController::class, 'unsubscribe']);

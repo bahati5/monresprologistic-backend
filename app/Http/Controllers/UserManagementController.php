@@ -7,18 +7,36 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules;
 
 class UserManagementController extends Controller
 {
     use Concerns\InteractsWithAgencyVisibility;
 
+    /** Rôles « staff » listés en gestion utilisateurs. */
+    private const STAFF_ROLE_NAMES = ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent'];
+
+    /**
+     * Rôles assignables par l'utilisateur connecté (PRD §4 — plus legacy admin/employee).
+     *
+     * @return list<string>
+     */
+    private function assignableRoleNames(User $actor): array
+    {
+        if ($actor->hasRole('super_admin')) {
+            return ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent'];
+        }
+
+        return ['agency_admin', 'operator', 'driver', 'customs_agent'];
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
         $query = User::query()
             ->with(['agency', 'roles'])
-            ->whereHas('roles', fn ($q) => $q->whereIn('name', ['super_admin', 'admin', 'employee']));
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', self::STAFF_ROLE_NAMES));
 
         if (! $user->canAccessAllAgencies()) {
             $query->where('agency_id', $user->agency_id);
@@ -46,19 +64,21 @@ class UserManagementController extends Controller
             'users' => $users,
             'filters' => $request->only(['search', 'role', 'agency_id']),
             'agencies' => $this->getAgencies($user),
-            'availableRoles' => ['super_admin', 'admin', 'employee'],
+            'availableRoles' => $this->assignableRoleNames($user),
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
+        $assignable = $this->assignableRoleNames($request->user());
+
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:32'],
             'password' => ['required', Rules\Password::defaults()],
             'agency_id' => ['nullable', 'exists:agencies,id'],
-            'role' => ['required', 'in:super_admin,admin,employee'],
+            'role' => ['required', 'string', Rule::in($assignable)],
         ]);
 
         $newUser = User::create([
@@ -77,12 +97,14 @@ class UserManagementController extends Controller
 
     public function update(Request $request, User $user): JsonResponse
     {
+        $assignable = $this->assignableRoleNames($request->user());
+
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'unique:users,email,' . $user->id],
+            'email' => ['required', 'email', 'unique:users,email,'.$user->id],
             'phone' => ['nullable', 'string', 'max:32'],
             'agency_id' => ['nullable', 'exists:agencies,id'],
-            'role' => ['required', 'in:super_admin,admin,employee'],
+            'role' => ['required', 'string', Rule::in($assignable)],
         ]);
 
         $user->update([

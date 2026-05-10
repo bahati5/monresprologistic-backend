@@ -90,6 +90,13 @@
     </div>
     @endif
 
+    {{-- BARCODE --}}
+    @if(!empty($tracking_barcode_data_uri))
+    <div style="text-align: center; margin: 6px 0;">
+        <img src="{{ $tracking_barcode_data_uri }}" style="width: 180px; height: 40px;" alt="Code-barres">
+    </div>
+    @endif
+
     {{-- TRACKING --}}
     <div class="tracking-num">{{ $shipment->public_tracking ?? '—' }}</div>
 

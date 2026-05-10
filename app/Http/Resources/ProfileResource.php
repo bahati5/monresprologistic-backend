@@ -47,6 +47,11 @@ class ProfileResource extends JsonResource
             'has_account' => $this->relationLoaded('user') ? $this->user !== null : null,
             'locker_number' => $this->whenLoaded('user', fn () => $this->user?->locker_number),
             'created_at' => $this->created_at,
+            // Shipment role counts for badges
+            'shipments_as_sender_count' => $this->whenCounted('sentShipments', fn () => (int) ($this->sent_shipments_count ?? 0)),
+            'shipments_as_recipient_count' => $this->whenCounted('receivedShipments', fn () => (int) ($this->received_shipments_count ?? 0)),
+            'has_shipments_as_sender' => $this->whenCounted('sentShipments', fn () => ($this->sent_shipments_count ?? 0) > 0, false),
+            'has_shipments_as_recipient' => $this->whenCounted('receivedShipments', fn () => ($this->received_shipments_count ?? 0) > 0, false),
         ];
     }
 }

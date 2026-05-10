@@ -15,6 +15,7 @@ class AssistedPurchase extends Model
         'price_displayed', 'price_currency', 'quote_amount', 'quote_currency', 'service_fee', 'bank_fee_percentage', 'payment_methods_note', 'supplier_tracking_number', 'total_amount',
         'commission_breakdown', 'quoted_at', 'paid_at', 'purchased_at', 'converted_pre_alert_id', 'converted_shipment_id',
         'payment_proof_path',
+        'estimated_weight_kg', 'hub_received_weight_kg', 'hub_received_photo_path',
     ];
 
     protected $appends = ['status_label', 'status_color', 'payment_proof_url'];
@@ -30,6 +31,8 @@ class AssistedPurchase extends Model
             'quoted_at' => 'datetime',
             'paid_at' => 'datetime',
             'purchased_at' => 'datetime',
+            'estimated_weight_kg' => 'decimal:3',
+            'hub_received_weight_kg' => 'decimal:3',
         ];
     }
 

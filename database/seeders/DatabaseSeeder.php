@@ -18,7 +18,9 @@ class DatabaseSeeder extends Seeder
             RolesAndPermissionsSeeder::class,
             LocationSeeder::class,
             SuperAdminSeeder::class,
+            PickupFailureReasonsSeeder::class,
             MerchantSeeder::class,
+            LogisticsSeeder::class,
         ]);
     }
 }

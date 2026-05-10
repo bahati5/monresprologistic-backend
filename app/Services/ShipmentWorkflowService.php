@@ -10,11 +10,13 @@ class ShipmentWorkflowService
 {
     /**
      * Étapes affichées : pré-alerte = en attente dépôt → hub → … ; comptoir = brouillon → hub → … (sans étape pré-alerte).
+     * Achat assisté = commence au hub (car colis déjà reçu).
      *
      * @return list<ShipmentStatus>
      */
     public function displayFlowFor(Shipment $shipment): array
     {
+        // Pre-alert shipments: start at pending drop-off
         if ($shipment->pre_alert_id) {
             return [
                 ShipmentStatus::PendingDropOff,
@@ -26,6 +28,18 @@ class ShipmentWorkflowService
             ];
         }
 
+        // Assisted purchase shipments: start at received at hub (already at warehouse)
+        if ($shipment->assisted_purchase_id) {
+            return [
+                ShipmentStatus::ReceivedAtHub,
+                ShipmentStatus::ReadyForDispatch,
+                ShipmentStatus::InTransit,
+                ShipmentStatus::ArrivedAtDestination,
+                ShipmentStatus::Delivered,
+            ];
+        }
+
+        // Standard counter shipments: start at draft
         return [
             ShipmentStatus::Draft,
             ShipmentStatus::ReceivedAtHub,
@@ -107,9 +121,13 @@ class ShipmentWorkflowService
             ShipmentStatus::ReceivedAtHub => '#14b8a6',
             ShipmentStatus::ReadyForDispatch => '#f59e0b',
             ShipmentStatus::InTransit => '#8b5cf6',
+            ShipmentStatus::CustomsHold => '#dc2626',
             ShipmentStatus::ArrivedAtDestination => '#06b6d4',
+            ShipmentStatus::DeliveryFailed => '#f97316',
             ShipmentStatus::Delivered => '#10b981',
             ShipmentStatus::Cancelled => '#ef4444',
+            ShipmentStatus::Expired => '#94a3b8',
+            ShipmentStatus::IssueReported => '#ea580c',
         };
     }
 

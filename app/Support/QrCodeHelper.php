@@ -22,7 +22,8 @@ final class QrCodeHelper
         }
 
         try {
-            $qr = QrCode::create($tracking)->setSize($size)->setMargin(4);
+            $trackingUrl = rtrim((string) config('app.url'), '/') . '/track/' . urlencode($tracking);
+            $qr = QrCode::create($trackingUrl)->setSize($size)->setMargin(4);
             // DomPDF exige GD pour intégrer les PNG ; le SVG fonctionne sans GD.
             $writer = extension_loaded('gd') ? new PngWriter : new SvgWriter;
 

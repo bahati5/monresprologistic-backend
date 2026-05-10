@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Setting;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Applique la configuration SMTP stockée en base (table settings) au mailer Laravel par défaut.
@@ -15,6 +16,10 @@ class DynamicMailSettings
      */
     public static function buildSmtpMailerConfigFromDatabase(): ?array
     {
+        if (! Schema::hasTable('settings')) {
+            return null;
+        }
+
         $host = trim((string) Setting::getValue('smtp_host', ''));
         if ($host === '') {
             return null;

@@ -117,6 +117,7 @@
                     <tr><td class="label-cell">Mode d'expédition</td><td class="value-cell">{{ $logistics['shippingMode'] ?? '—' }}</td></tr>
                     <tr><td class="label-cell">Compagnie de courrier</td><td class="value-cell">{{ $logistics['transport'] ?? '—' }}</td></tr>
                     <tr><td class="label-cell">Date d'enregistrement</td><td class="value-cell">{{ $shipment->created_at?->format('Y-m-d H:i') ?? '—' }}</td></tr>
+                    <tr><td class="label-cell">Opérateur</td><td class="value-cell">{{ $shipment->creator?->name ?? '—' }}</td></tr>
                     <tr><td class="label-cell">Numéro de facture</td><td class="value-cell">{{ $invoiceNo }}</td></tr>
                 </table>
             </td>

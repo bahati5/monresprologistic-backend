@@ -26,7 +26,7 @@ class ShipmentWizardController extends Controller
     use NormalizesOptionalEmail;
 
     /**
-     * Recherche fiches clients (Profiles avec agency_id, possiblement avec compte portail).
+     * Recherche fiches clients (Profiles avec is_client = true, possiblement avec compte portail).
      */
     public function searchClients(Request $request): JsonResponse
     {
@@ -35,6 +35,7 @@ class ShipmentWizardController extends Controller
         $user = $request->user();
 
         $query = Profile::query()
+            ->clients() // Only search client profiles
             ->search($request->input('q'))
             ->with(['user'])
             ->limit(20);

@@ -27,11 +27,13 @@ class PreAlert extends Model implements HasMedia
         'notes',
         'description',
         'declared_value',
+        'declared_weight_kg',
         'value_currency',
         'purchase_date',
         'estimated_arrival_date',
         'converted_shipment_id',
         'converted_customer_package_id',
+        'issue_reported',
     ];
 
     protected function casts(): array
@@ -39,8 +41,10 @@ class PreAlert extends Model implements HasMedia
         return [
             'status' => ShipmentStatus::class,
             'declared_value' => 'decimal:2',
+            'declared_weight_kg' => 'decimal:3',
             'purchase_date' => 'date',
             'estimated_arrival_date' => 'date',
+            'issue_reported' => 'boolean',
         ];
     }
 
@@ -91,6 +95,10 @@ class PreAlert extends Model implements HasMedia
     {
         return $query
             ->whereNull('converted_customer_package_id')
-            ->where('status', '!=', ShipmentStatus::ReceivedAtHub->value);
+            ->whereNotIn('status', [
+                ShipmentStatus::ReceivedAtHub->value,
+                ShipmentStatus::Cancelled->value,
+                ShipmentStatus::Expired->value,
+            ]);
     }
 }

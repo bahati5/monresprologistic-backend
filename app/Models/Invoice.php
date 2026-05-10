@@ -9,8 +9,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Invoice extends Model
 {
     protected $fillable = [
-        'invoice_number', 'user_id', 'shipment_id', 'amount', 'base_amount', 'currency',
-        'status', 'due_at', 'paid_at',
+        'invoice_number', 'user_id', 'shipment_id', 'agency_id',
+        'amount', 'base_amount', 'currency',
+        'status', 'due_at', 'paid_at', 'odoo_exported_at',
     ];
 
     protected function casts(): array
@@ -18,6 +19,7 @@ class Invoice extends Model
         return [
             'due_at' => 'datetime',
             'paid_at' => 'datetime',
+            'odoo_exported_at' => 'datetime',
             'base_amount' => 'decimal:2',
         ];
     }
@@ -30,6 +32,11 @@ class Invoice extends Model
     public function shipment(): BelongsTo
     {
         return $this->belongsTo(Shipment::class);
+    }
+
+    public function agency(): BelongsTo
+    {
+        return $this->belongsTo(Agency::class);
     }
 
     public function paymentProofs(): HasMany

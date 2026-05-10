@@ -28,7 +28,10 @@ class RolesAndPermissionsSeeder extends Seeder
             'view_crm', 'view_inbound',
             'manage_customer_packages', 'view_customer_packages',
             'view_tracking',
-            'manage_documents', 'manage_translations',
+            'manage_documents',
+            'manage_refunds', 'approve_refunds',
+            'manage_exchange_rates',
+            'view_analytics',
         ];
 
         foreach ($permissions as $name) {
@@ -45,14 +48,17 @@ class RolesAndPermissionsSeeder extends Seeder
                 'view_regroupements', 'create_regroupements', 'manage_regroupements',
                 'manage_users', 'manage_roles', 'view_reports', 'export_data',
                 'manage_pre_alerts', 'manage_assisted_purchases',
-                'manage_settings', 'manage_statuses', 'manage_pricing', 'manage_notifications',
+                'manage_statuses', 'manage_pricing', 'manage_notifications',
                 'manage_agencies',
                 'manage_clients', 'manage_drivers',
                 'manage_newsletter',
                 'view_crm', 'view_inbound',
                 'manage_customer_packages', 'view_customer_packages',
                 'view_tracking',
-                'manage_documents', 'manage_translations',
+                'manage_documents',
+                'manage_refunds', 'approve_refunds',
+                'manage_exchange_rates',
+                'view_analytics',
             ],
             'operator' => [
                 'view_shipments', 'create_shipments', 'edit_shipments',
@@ -63,6 +69,8 @@ class RolesAndPermissionsSeeder extends Seeder
                 'view_inbound',
                 'manage_customer_packages', 'view_customer_packages',
                 'view_tracking',
+                'manage_refunds',
+                'view_reports',
             ],
             'driver' => [
                 'manage_pickups', 'view_shipments', 'view_tracking',

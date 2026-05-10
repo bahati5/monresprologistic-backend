@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ShipmentStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -19,6 +20,7 @@ class Shipment extends Model
         'origin_country_id',
         'dest_country_id',
         'status',
+        'service_flow',
         'regroupement_id',
         'master_shipment_id',
         'pre_alert_id',
@@ -39,9 +41,11 @@ class Shipment extends Model
         'current_hub_id',
         'delivery_signature',
         'delivery_notes',
+        'delivery_proof_path',
         'payment_status',
         'amount_paid',
         'paid_at',
+        'signed_form_path',
     ];
 
     protected function casts(): array
@@ -52,6 +56,12 @@ class Shipment extends Model
             'pricing_snapshot' => 'array',
             'paid_at' => 'datetime',
         ];
+    }
+
+    /** Pour KPI / CA / rapports : les brouillons ne sont pas des expéditions « réelles ». */
+    public function scopeExcludingDrafts(Builder $query): Builder
+    {
+        return $query->whereNot($query->qualifyColumn('status'), ShipmentStatus::Draft);
     }
 
     // ─── Relationships ───────────────────────────────

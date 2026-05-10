@@ -100,10 +100,12 @@ class SectionDashboardController extends Controller
         $base = Shipment::query();
         $this->scopeShipmentsForUser($base, $user);
 
+        $baseNonDraft = (clone $base)->excludingDrafts();
+
         $terminal = [ShipmentStatus::Delivered->value, ShipmentStatus::Cancelled->value];
 
-        $active = (clone $base)->whereNotIn('status', $terminal)->count();
-        $created_today = (clone $base)->whereDate('created_at', today())->count();
+        $active = (clone $baseNonDraft)->whereNotIn('status', $terminal)->count();
+        $created_today = (clone $baseNonDraft)->whereDate('created_at', today())->count();
         $in_transit = (clone $base)->where('status', ShipmentStatus::InTransit)->count();
 
         $startMonth = now()->startOfMonth();
@@ -112,7 +114,7 @@ class SectionDashboardController extends Controller
             ->where('updated_at', '>=', $startMonth)
             ->count();
 
-        $total_done = (clone $base)->where('status', ShipmentStatus::Delivered)->count();
+        $total_done = (clone $baseNonDraft)->where('status', ShipmentStatus::Delivered)->count();
         $delivery_rate = $total_done + $active > 0 ? (int) round(100 * $total_done / max(1, $total_done + $active)) : 0;
 
         $deliveredSample = (clone $base)
@@ -133,7 +135,7 @@ class SectionDashboardController extends Controller
             $we = $ws->copy()->endOfWeek();
             $weekly_evolution[] = [
                 'week' => 'S'.$ws->isoWeek(),
-                'count' => (clone $base)->whereBetween('created_at', [$ws, $we])->count(),
+                'count' => (clone $baseNonDraft)->whereBetween('created_at', [$ws, $we])->count(),
             ];
         }
 

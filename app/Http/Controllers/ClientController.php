@@ -3,14 +3,20 @@
 namespace App\Http\Controllers;
 
 use App\Http\Resources\ProfileResource;
+use App\Models\AddressBook;
 use App\Models\Agency;
+use App\Models\AssistedPurchase;
+use App\Models\Country;
 use App\Models\Invoice;
 use App\Models\Locker;
+use App\Models\PreAlert;
 use App\Models\Profile;
 use App\Models\Setting;
 use App\Models\Shipment;
+use App\Models\ShipmentLog;
 use App\Models\User;
 use App\Support\LockerNumberGenerator;
+use App\Support\PhoneNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -30,7 +36,9 @@ class ClientController extends Controller
 
         $query = Profile::query()
             ->with(['agency', 'user', 'city', 'state', 'country'])
-            ->withCount(['savedByProfiles as address_book_count']);
+            ->withCount(['savedByProfiles as address_book_count'])
+            ->withCount('sentShipments')
+            ->withCount('receivedShipments');
 
         if (! $user->canAccessAllAgencies()) {
             $query->where('agency_id', $user->agency_id);
@@ -148,6 +156,13 @@ class ClientController extends Controller
                 Rule::exists('cities', 'id')->where('state_id', $request->integer('state_id')),
             ],
         ]);
+
+        $country = Country::query()->find($data['country_id']);
+        $phoneCode = $country !== null ? (string) ($country->phonecode ?? '') : '';
+        $data['phone'] = PhoneNormalizer::normalize($data['phone'], $phoneCode !== '' ? '+'.$phoneCode : null);
+        if (! empty($data['phone_secondary'])) {
+            $data['phone_secondary'] = PhoneNormalizer::normalize($data['phone_secondary'], $phoneCode !== '' ? '+'.$phoneCode : null);
+        }
 
         $agencyId = $data['agency_id'] ?? $request->user()->agency_id;
         $profile = null;
@@ -374,105 +389,98 @@ class ClientController extends Controller
         $this->authorizeAgency($request->user(), $client);
 
         $client->load(['agency', 'user', 'city', 'state', 'country']);
-        $client->loadCount('savedByProfiles');
+        $client->loadCount(['savedByProfiles', 'sentShipments', 'receivedShipments']);
 
         $userId = $client->user?->id;
 
-        // Shipments sent by this client
         $sentShipments = Shipment::query()
             ->where('sender_profile_id', $client->id)
-            ->with(['recipientProfile', 'status'])
+            ->with(['recipientProfile'])
             ->latest()
             ->paginate(10, ['*'], 'sent_page');
 
-        // Shipments received by this client (as recipient)
         $receivedShipments = Shipment::query()
             ->where('recipient_profile_id', $client->id)
-            ->with(['senderProfile', 'status'])
+            ->with(['senderProfile'])
             ->latest()
             ->paginate(10, ['*'], 'received_page');
 
-        // Assisted purchases
-        $assistedPurchases = \App\Models\AssistedPurchase::query()
-            ->where('user_id', $userId)
-            ->orWhereHas('preAlert', fn($q) => $q->where('user_id', $userId))
+        $assistedPurchases = AssistedPurchase::query()
+            ->when(
+                $userId,
+                fn ($q) => $q->where('user_id', $userId),
+                fn ($q) => $q->whereRaw('0 = 1'),
+            )
             ->latest()
             ->paginate(10, ['*'], 'purchase_page');
 
-        // Shipment notices / pre-alerts
-        $shipmentNotices = \App\Models\PreAlert::query()
-            ->where('user_id', $userId)
+        $shipmentNotices = PreAlert::query()
+            ->when(
+                $userId,
+                fn ($q) => $q->where('user_id', $userId),
+                fn ($q) => $q->whereRaw('0 = 1'),
+            )
             ->latest()
             ->paginate(10, ['*'], 'notice_page');
 
-        // Invoices
-        $invoices = $userId
-            ? Invoice::query()->where('user_id', $userId)->latest()->paginate(10, ['*'], 'invoice_page')
-            : collect();
+        $invoices = Invoice::query()
+            ->when(
+                $userId,
+                fn ($q) => $q->where('user_id', $userId),
+                fn ($q) => $q->whereRaw('0 = 1'),
+            )
+            ->latest()
+            ->paginate(10, ['*'], 'invoice_page');
 
-        // Address book entries (contacts saved by this client)
         $addressBookEntries = AddressBook::query()
             ->where('owner_profile_id', $client->id)
             ->with('contactProfile')
             ->latest()
             ->paginate(10, ['*'], 'contact_page');
 
+        $relatedShipmentIds = Shipment::query()
+            ->where('sender_profile_id', $client->id)
+            ->orWhere('recipient_profile_id', $client->id)
+            ->pluck('id');
+
+        $timeline = ShipmentLog::query()
+            ->whereIn('shipment_id', $relatedShipmentIds)
+            ->with(['shipment:id,public_tracking,sender_profile_id,recipient_profile_id', 'user:id,name'])
+            ->latest('created_at')
+            ->limit(50)
+            ->get()
+            ->map(fn (ShipmentLog $log) => [
+                'id' => $log->id,
+                'type' => 'shipment_log',
+                'shipment_id' => $log->shipment_id,
+                'tracking' => $log->shipment?->public_tracking,
+                'role' => $log->shipment?->sender_profile_id === $client->id ? 'sender' : 'recipient',
+                'status' => $log->status?->value ?? $log->status,
+                'title' => $log->title,
+                'description' => $log->description,
+                'user_name' => $log->user?->name,
+                'created_at' => $log->created_at?->toIso8601String(),
+            ]);
+
+        $paginatorToArray = fn ($paginator) => [
+            'data' => $paginator->items(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ];
+
         return response()->json([
             'client' => new ProfileResource($client),
-            'sentShipments' => [
-                'data' => $sentShipments->items(),
-                'meta' => [
-                    'current_page' => $sentShipments->currentPage(),
-                    'last_page' => $sentShipments->lastPage(),
-                    'per_page' => $sentShipments->perPage(),
-                    'total' => $sentShipments->total(),
-                ],
-            ],
-            'receivedShipments' => [
-                'data' => $receivedShipments->items(),
-                'meta' => [
-                    'current_page' => $receivedShipments->currentPage(),
-                    'last_page' => $receivedShipments->lastPage(),
-                    'per_page' => $receivedShipments->perPage(),
-                    'total' => $receivedShipments->total(),
-                ],
-            ],
-            'assistedPurchases' => [
-                'data' => $assistedPurchases->items(),
-                'meta' => [
-                    'current_page' => $assistedPurchases->currentPage(),
-                    'last_page' => $assistedPurchases->lastPage(),
-                    'per_page' => $assistedPurchases->perPage(),
-                    'total' => $assistedPurchases->total(),
-                ],
-            ],
-            'shipmentNotices' => [
-                'data' => $shipmentNotices->items(),
-                'meta' => [
-                    'current_page' => $shipmentNotices->currentPage(),
-                    'last_page' => $shipmentNotices->lastPage(),
-                    'per_page' => $shipmentNotices->perPage(),
-                    'total' => $shipmentNotices->total(),
-                ],
-            ],
-            'invoices' => [
-                'data' => $invoices->items(),
-                'meta' => [
-                    'current_page' => $invoices->currentPage(),
-                    'last_page' => $invoices->lastPage(),
-                    'per_page' => $invoices->perPage(),
-                    'total' => $invoices->total(),
-                ],
-            ],
-            'addressBookEntries' => [
-                'data' => $addressBookEntries->items(),
-                'meta' => [
-                    'current_page' => $addressBookEntries->currentPage(),
-                    'last_page' => $addressBookEntries->lastPage(),
-                    'per_page' => $addressBookEntries->perPage(),
-                    'total' => $addressBookEntries->total(),
-                ],
-            ],
+            'sentShipments' => $paginatorToArray($sentShipments),
+            'receivedShipments' => $paginatorToArray($receivedShipments),
+            'assistedPurchases' => $paginatorToArray($assistedPurchases),
+            'shipmentNotices' => $paginatorToArray($shipmentNotices),
+            'invoices' => $paginatorToArray($invoices),
+            'addressBookEntries' => $paginatorToArray($addressBookEntries),
+            'timeline' => $timeline,
         ]);
     }
 
@@ -490,5 +498,51 @@ class ClientController extends Controller
         }
 
         return Agency::where('id', $user->agency_id)->get(['id', 'name']);
+    }
+
+    /**
+     * §21.2 — Détection de doublon client avant création.
+     * Retourne les profils existants similaires (même téléphone, email ou nom proche).
+     */
+    public function checkDuplicates(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'string', 'email', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:30'],
+        ]);
+
+        $user = $request->user();
+        $duplicates = [];
+
+        if (! empty($data['phone'])) {
+            $byPhone = Profile::query()
+                ->where('phone', $data['phone'])
+                ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+                ->with('user')
+                ->limit(5)
+                ->get(['id', 'full_name', 'email', 'phone', 'agency_id']);
+            foreach ($byPhone as $p) {
+                $duplicates[] = ['profile' => $p, 'match_type' => 'phone'];
+            }
+        }
+
+        if (! empty($data['email'])) {
+            $byEmail = Profile::query()
+                ->where('email', $data['email'])
+                ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+                ->limit(5)
+                ->get(['id', 'full_name', 'email', 'phone', 'agency_id']);
+            foreach ($byEmail as $p) {
+                if (! collect($duplicates)->contains(fn ($d) => $d['profile']->id === $p->id)) {
+                    $duplicates[] = ['profile' => $p, 'match_type' => 'email'];
+                }
+            }
+        }
+
+        return response()->json([
+            'has_duplicates' => count($duplicates) > 0,
+            'duplicates' => $duplicates,
+        ]);
     }
 }
