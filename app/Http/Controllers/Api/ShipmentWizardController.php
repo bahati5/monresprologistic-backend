@@ -272,6 +272,87 @@ class ShipmentWizardController extends Controller
     }
 
     /**
+     * Crée un compte portail (User) pour un profil client existant sans portail.
+     * Utilisé par l'achat assisté quand le staff sélectionne un client sans compte.
+     */
+    public function quickCreatePortal(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'profile_id' => ['required', 'integer', 'exists:profiles,id'],
+        ]);
+
+        $profile = Profile::findOrFail($data['profile_id']);
+        $authUser = $request->user();
+
+        if (! $authUser->canAccessAllAgencies() && (int) ($profile->agency_id ?? 0) !== (int) ($authUser->agency_id ?? 0)) {
+            abort(403, 'Ce profil n\'appartient pas à votre agence.');
+        }
+
+        if ($profile->user) {
+            return response()->json([
+                'id' => $profile->id,
+                'user_id' => $profile->user->id,
+                'name' => $profile->full_name,
+                'has_portal' => true,
+            ]);
+        }
+
+        $email = $profile->email;
+        if (! $email || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $email = 'client-' . $profile->id . '@portal.monrespro.local';
+        }
+
+        if (User::where('email', $email)->exists()) {
+            $email = 'client-' . $profile->id . '-' . now()->timestamp . '@portal.monrespro.local';
+        }
+
+        $portalUser = null;
+        DB::transaction(function () use ($profile, $email, $authUser, &$portalUser) {
+            $tempPassword = \Illuminate\Support\Str::random(32);
+            $portalUser = User::create([
+                'profile_id' => $profile->id,
+                'name' => $profile->full_name,
+                'first_name' => $profile->first_name,
+                'last_name' => $profile->last_name,
+                'email' => $email,
+                'phone' => $profile->phone,
+                'password' => Hash::make($tempPassword),
+                'agency_id' => $profile->agency_id ?? $authUser->agency_id,
+                'email_verified_at' => now(),
+            ]);
+            $portalUser->assignRole('client');
+
+            $existingLocker = Locker::where('profile_id', $profile->id)->first();
+            if (! $existingLocker) {
+                $code = LockerNumberGenerator::generate();
+                $template = Setting::getValue('locker_address_template', '');
+                $formatted = str_replace('{{locker_code}}', $code, $template);
+                Locker::create([
+                    'profile_id' => $profile->id,
+                    'user_id' => $portalUser->id,
+                    'code' => $code,
+                    'formatted_address' => $formatted,
+                ]);
+                $portalUser->update(['locker_number' => $code]);
+            } else {
+                $existingLocker->update(['user_id' => $portalUser->id]);
+                $portalUser->update(['locker_number' => $existingLocker->code]);
+            }
+        });
+
+        $token = app('auth.password.broker')->createToken($portalUser);
+        $portalUser->sendPasswordResetNotification($token);
+
+        return response()->json([
+            'id' => $profile->id,
+            'user_id' => $portalUser->id,
+            'name' => $profile->full_name,
+            'email' => $portalUser->email,
+            'has_portal' => true,
+        ], 201);
+    }
+
+    /**
      * Creation rapide d'un destinataire (Profile + address_book entry).
      */
     public function quickCreateRecipient(Request $request): JsonResponse
@@ -455,5 +536,29 @@ class ShipmentWizardController extends Controller
     public function shipLinesForRoute(Request $request): JsonResponse
     {
         return app(ShipLineController::class)->forRoute($request);
+    }
+
+    /**
+     * Resolve a user_id or profile_id to a display name for the client combobox.
+     */
+    public function clientName(Request $request, int $id): JsonResponse
+    {
+        $user = User::find($id);
+        if ($user) {
+            return response()->json([
+                'name' => $user->name,
+                'full_name' => trim(($user->first_name ?? '').' '.($user->last_name ?? '')) ?: $user->name,
+            ]);
+        }
+
+        $profile = Profile::find($id);
+        if ($profile) {
+            return response()->json([
+                'name' => $profile->full_name ?? trim(($profile->first_name ?? '').' '.($profile->last_name ?? '')),
+                'full_name' => $profile->full_name ?? trim(($profile->first_name ?? '').' '.($profile->last_name ?? '')),
+            ]);
+        }
+
+        return response()->json(['name' => '', 'full_name' => ''], 404);
     }
 }

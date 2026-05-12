@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class AssistedPurchase extends Model
 {
@@ -16,6 +17,8 @@ class AssistedPurchase extends Model
         'commission_breakdown', 'quoted_at', 'paid_at', 'purchased_at', 'converted_pre_alert_id', 'converted_shipment_id',
         'payment_proof_path',
         'estimated_weight_kg', 'hub_received_weight_kg', 'hub_received_photo_path',
+        'is_urgent', 'quote_version', 'quote_expires_at', 'reminder_count', 'last_reminder_at',
+        'refusal_reason', 'refusal_note', 'clarification_message', 'clarification_sent_at',
     ];
 
     protected $appends = ['status_label', 'status_color', 'payment_proof_url'];
@@ -33,6 +36,12 @@ class AssistedPurchase extends Model
             'purchased_at' => 'datetime',
             'estimated_weight_kg' => 'decimal:3',
             'hub_received_weight_kg' => 'decimal:3',
+            'is_urgent' => 'boolean',
+            'quote_version' => 'integer',
+            'quote_expires_at' => 'datetime',
+            'reminder_count' => 'integer',
+            'last_reminder_at' => 'datetime',
+            'clarification_sent_at' => 'datetime',
         ];
     }
 
@@ -89,5 +98,32 @@ class AssistedPurchase extends Model
     public function convertedShipment(): BelongsTo
     {
         return $this->belongsTo(Shipment::class, 'converted_shipment_id');
+    }
+
+    public static function generateReferenceCode(): string
+    {
+        $prefix = 'AP-';
+        $code = $prefix . strtoupper(\Illuminate\Support\Str::random(8));
+
+        while (static::where('line_notes', 'like', '%"reference_code":"' . $code . '"%')->exists()) {
+            $code = $prefix . strtoupper(\Illuminate\Support\Str::random(8));
+        }
+
+        return $code;
+    }
+
+    public function snapshots(): HasMany
+    {
+        return $this->hasMany(QuoteSnapshot::class)->orderByDesc('version');
+    }
+
+    public function latestSnapshot()
+    {
+        return $this->hasOne(QuoteSnapshot::class)->latestOfMany('version');
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(AssistedPurchasePayment::class)->orderByDesc('id');
     }
 }

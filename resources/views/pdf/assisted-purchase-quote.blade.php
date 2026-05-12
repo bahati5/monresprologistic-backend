@@ -1,10 +1,11 @@
 @php
     /** @var \App\Models\AssistedPurchase $purchase */
+    /** @var array|null $snapshot */
     /** @var array $present */
     /** @var list<array{label: string, value: string}> $clientRows */
     $doc = $present['doc'] ?? [];
     $site = $doc['site_name'] ?? config('app.name', 'Monrespro');
-    $pdfSym = trim((string) ($doc['currency_symbol'] ?? '€'));
+    $pdfSym = trim((string) ($doc['currency_symbol'] ?? '$'));
     $pdfSuffix = ((string) (\App\Models\Setting::getValue('symbol_position', 'prefix') ?: 'prefix')) === 'suffix';
     $pdfDec = max(0, min(6, (int) ($doc['decimals'] ?? 2)));
     $pdfFmt = static function (float $n) use ($pdfSym, $pdfSuffix, $pdfDec): string {
@@ -12,12 +13,14 @@
         $sp = html_entity_decode('&nbsp;', ENT_QUOTES | ENT_HTML5, 'UTF-8');
         return $pdfSuffix ? $num.$sp.$pdfSym : $pdfSym.$num;
     };
+    $useSnapshot = !empty($snapshot);
+    $accent = '#073763';
 @endphp
 <!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="utf-8">
-    <title>Devis #{{ $purchase->id }} — {{ $site }}</title>
+    <title>Devis #{{ $purchase->id }}@if($useSnapshot && ($snapshot['version'] ?? 1) > 1) v{{ $snapshot['version'] }}@endif — {{ $site }}</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -29,128 +32,44 @@
             line-height: 1.45;
         }
         .accent { color: {{ $accent }}; }
-        .header-row {
-            width: 100%;
-            margin-bottom: 28px;
-        }
+        .header-row { width: 100%; margin-bottom: 28px; }
         .header-row td { vertical-align: top; }
-        .brand-name {
-            font-size: 16pt;
-            font-weight: bold;
-            color: {{ $accent }};
-            margin: 0 0 6px 0;
-        }
-        .brand-meta {
-            font-size: 9pt;
-            color: #5c5c6e;
-            line-height: 1.5;
-        }
-        .devis-title {
-            text-align: right;
-            font-size: 22pt;
-            font-weight: bold;
-            letter-spacing: 0.06em;
-            color: {{ $accent }};
-            margin: 0;
-        }
-        .devis-meta {
-            text-align: right;
-            font-size: 9.5pt;
-            color: #5c5c6e;
-            margin-top: 6px;
-        }
-        .section-label {
-            font-size: 8.5pt;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: #7a7a8c;
-            margin: 0 0 8px 0;
-        }
-        .client-box {
-            border: 1px solid #e2e2ea;
-            border-radius: 10px;
-            padding: 14px 16px;
-            margin-bottom: 22px;
-            background: #fafafc;
-        }
-        .client-row {
-            width: 100%;
-            margin-bottom: 8px;
-        }
+        .brand-name { font-size: 16pt; font-weight: bold; color: {{ $accent }}; margin: 0 0 6px 0; }
+        .brand-meta { font-size: 9pt; color: #5c5c6e; line-height: 1.5; }
+        .devis-title { text-align: right; font-size: 22pt; font-weight: bold; letter-spacing: 0.06em; color: {{ $accent }}; margin: 0; }
+        .devis-meta { text-align: right; font-size: 9.5pt; color: #5c5c6e; margin-top: 6px; }
+        .section-label { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.08em; color: #7a7a8c; margin: 0 0 8px 0; }
+        .client-box { border: 1px solid #e2e2ea; border-radius: 10px; padding: 14px 16px; margin-bottom: 22px; background: #fafafc; }
+        .client-row { width: 100%; margin-bottom: 8px; }
         .client-row:last-child { margin-bottom: 0; }
         .client-row td { vertical-align: top; padding: 3px 0; }
-        .c-lab {
-            font-size: 8pt;
-            color: #7a7a8c;
-            width: 32%;
-        }
-        .c-val {
-            font-size: 10pt;
-            font-weight: bold;
-            white-space: pre-line;
-        }
-        table.items {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 8px;
-        }
-        table.items thead th {
-            background: {{ $accent }};
-            color: #fff;
-            font-size: 9pt;
-            font-weight: bold;
-            padding: 10px 8px;
-            text-align: left;
-        }
+        .c-lab { font-size: 8pt; color: #7a7a8c; width: 32%; }
+        .c-val { font-size: 10pt; font-weight: bold; white-space: pre-line; }
+        table.items { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        table.items thead th { background: {{ $accent }}; color: #fff; font-size: 9pt; font-weight: bold; padding: 10px 8px; text-align: left; }
         table.items thead th.num { text-align: right; }
-        table.items tbody td {
-            border-bottom: 1px solid #e8e8ef;
-            padding: 10px 8px;
-            vertical-align: top;
-        }
-        table.items tbody td.num {
-            text-align: right;
-            font-weight: bold;
-        }
+        table.items tbody td { border-bottom: 1px solid #e8e8ef; padding: 10px 8px; vertical-align: top; }
+        table.items tbody td.num { text-align: right; font-weight: bold; }
         .item-name { font-weight: bold; font-size: 10.5pt; }
         .item-sub { font-size: 8.5pt; color: #6b6b7a; margin-top: 4px; }
-        .totals-wrap {
-            width: 100%;
-            margin-top: 18px;
-        }
+        .totals-wrap { width: 100%; margin-top: 18px; }
         .totals-wrap td { vertical-align: top; }
-        .note-block {
-            font-size: 9pt;
-            color: #4a4a58;
-            padding-right: 24px;
-        }
+        .note-block { font-size: 9pt; color: #4a4a58; padding-right: 24px; }
         .note-block strong { color: #333; }
-        .totals {
-            width: 260px;
-            margin-left: auto;
-        }
-        .totals tr td {
-            padding: 5px 0;
-            font-size: 9.5pt;
-        }
+        .totals { width: 280px; margin-left: auto; }
+        .totals tr td { padding: 5px 0; font-size: 9.5pt; }
         .totals tr td:first-child { text-align: right; color: #5c5c6e; padding-right: 12px; }
         .totals tr td:last-child { text-align: right; font-weight: bold; }
-        .total-due {
-            background: {{ $accent }};
-            color: #fff !important;
-            padding: 10px 12px !important;
-            margin-top: 6px;
-            border-radius: 6px;
-        }
+        .total-due { background: {{ $accent }}; color: #fff !important; padding: 10px 12px !important; margin-top: 6px; border-radius: 6px; }
         .total-due td { color: #fff !important; font-size: 11pt !important; }
-        .footer {
-            margin-top: 32px;
-            padding-top: 16px;
-            border-top: 1px solid #e2e2ea;
-            font-size: 8.5pt;
-            color: #6b6b7a;
-            text-align: center;
-        }
+        .fee-line td { font-size: 9pt; }
+        .fee-line td:first-child { color: #5c5c6e; }
+        .urgent-badge { display: inline-block; background: #f97316; color: #fff; font-size: 8pt; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+        .secondary-total { font-size: 9pt; color: #5c5c6e; text-align: right; margin-top: 4px; }
+        .validity-info { font-size: 8.5pt; color: #5c5c6e; margin-top: 12px; padding: 8px 12px; border: 1px solid #e2e2ea; border-radius: 6px; background: #f8f9fc; }
+        .cta-box { text-align: center; margin: 20px 0 12px; padding: 14px; background: {{ $accent }}; border-radius: 8px; }
+        .cta-box a { color: #fff; font-size: 11pt; font-weight: bold; text-decoration: none; }
+        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e2ea; font-size: 8.5pt; color: #6b6b7a; text-align: center; }
     </style>
 </head>
 <body>
@@ -166,9 +85,7 @@
             <p class="brand-name">{{ $site }}</p>
             <div class="brand-meta">
                 @if(!empty($doc['address'])){{ $doc['address'] }}<br>@endif
-                @php
-                    $cityLine = trim(($doc['zip_code'] ?? '').' '.($doc['city'] ?? ''));
-                @endphp
+                @php $cityLine = trim(($doc['zip_code'] ?? '').' '.($doc['city'] ?? '')); @endphp
                 @if($cityLine !== ''){{ $cityLine }}<br>@endif
                 @if(!empty($doc['country'])){{ $doc['country'] }}<br>@endif
                 @if(!empty($doc['phone']))Tél. {{ $doc['phone'] }}<br>@endif
@@ -176,8 +93,13 @@
             </div>
         </td>
         <td style="width:45%">
-            <p class="devis-title">DEVIS</p>
-            <p class="devis-meta">N° {{ $purchase->id }}<br>{{ $quotedAtFormatted }}</p>
+            <p class="devis-title">DEVIS @if($useSnapshot && ($snapshot['version'] ?? 1) > 1)<span style="font-size:14pt;">v{{ $snapshot['version'] }}</span>@endif</p>
+            <p class="devis-meta">
+                N° {{ $purchase->id }}<br>{{ $quotedAtFormatted }}
+                @if($useSnapshot && !empty($snapshot['is_urgent']))
+                    <br><span class="urgent-badge">URGENT</span>
+                @endif
+            </p>
         </td>
     </tr>
 </table>
@@ -185,12 +107,7 @@
 <p class="section-label">Client</p>
 <div class="client-box">
     @forelse($clientRows as $row)
-        <table class="client-row">
-            <tr>
-                <td class="c-lab">{{ $row['label'] }}</td>
-                <td class="c-val">{{ $row['value'] }}</td>
-            </tr>
-        </table>
+        <table class="client-row"><tr><td class="c-lab">{{ $row['label'] }}</td><td class="c-val">{{ $row['value'] }}</td></tr></table>
     @empty
         <p style="margin:0;color:#7a7a8c;">—</p>
     @endforelse
@@ -216,12 +133,8 @@
             <tr>
                 <td>
                     <div class="item-name">{{ $item->display_label }}</div>
-                    @if(!empty($item->options))
-                        <div class="item-sub">{{ $item->options }}</div>
-                    @endif
-                    @if(!empty($item->url))
-                        <div class="item-sub">{{ \Illuminate\Support\Str::limit((string) $item->url, 96) }}</div>
-                    @endif
+                    @if(!empty($item->options))<div class="item-sub">{{ $item->options }}</div>@endif
+                    @if(!empty($item->url))<div class="item-sub">{{ \Illuminate\Support\Str::limit((string) $item->url, 96) }}</div>@endif
                 </td>
                 <td class="num">{{ $pdfFmt($unit) }}</td>
                 <td class="num">{{ $qty }}</td>
@@ -231,10 +144,35 @@
     </tbody>
 </table>
 
+{{-- Dynamic quote lines from snapshot --}}
+@if($useSnapshot && !empty($snapshot['lines']))
+<p class="section-label" style="margin-top:16px;">Frais et services</p>
+<table class="totals" style="width:100%;">
+    @foreach($snapshot['lines'] as $snapLine)
+        @if($snapLine['is_visible_to_client'] ?? true)
+        <tr class="fee-line">
+            @php
+                $snapType = $snapLine['type'] ?? null;
+                $snapAmount = (float) ($snapLine['amount'] ?? $snapLine['total'] ?? 0);
+                $snapValue = $snapLine['value'] ?? $snapLine['unit_price'] ?? null;
+            @endphp
+            <td style="text-align:left; width:65%;">{{ $snapLine['name'] ?? '—' }}@if($snapType === 'percentage' && $snapValue !== null) ({{ $snapValue }}%)@endif</td>
+            <td style="text-align:right; font-weight:bold;">{{ $pdfFmt($snapAmount) }}</td>
+        </tr>
+        @endif
+    @endforeach
+</table>
+@endif
+
 <table class="totals-wrap">
     <tr>
-        <td style="width:52%">
-            @if(!empty($present['paymentMethodsNote']))
+        <td style="width:50%">
+            @if($useSnapshot && !empty($snapshot['staff_message']))
+                <div class="note-block">
+                    <strong>Message de votre conseiller</strong><br>
+                    {!! nl2br(e($snapshot['staff_message'])) !!}
+                </div>
+            @elseif(!empty($present['paymentMethodsNote']))
                 <div class="note-block">
                     <strong>Moyens de paiement</strong><br>
                     {!! nl2br(e($present['paymentMethodsNote'])) !!}
@@ -242,72 +180,85 @@
             @else
                 <div class="note-block">
                     <strong>Merci pour votre confiance.</strong><br>
-                    Réglez votre devis depuis votre espace client après réception de ce document.
+                    Acceptez votre devis en ligne pour poursuivre la commande.
                 </div>
             @endif
-            @if(!empty($present['paymentUrl']))
-                <div class="note-block" style="margin-top: 12px;">
-                    <strong>Accéder au devis en ligne (connexion requise)</strong><br>
-                    <span style="font-size: 9pt; word-break: break-all; color: #3d3d69;">{{ $present['paymentUrl'] }}</span>
+
+            @if($useSnapshot && !empty($snapshot['estimated_delivery']))
+                <div class="note-block" style="margin-top:10px;">
+                    <strong>Délai estimé :</strong> {{ $snapshot['estimated_delivery'] }}
                 </div>
             @endif
         </td>
-        <td style="width:48%">
+        <td style="width:50%">
             <table class="totals">
-                <tr>
-                    <td>Sous-total articles</td>
-                    <td>{{ $present['linesSubtotalFormatted'] }}</td>
-                </tr>
-                <tr>
-                    <td>Frais de service</td>
-                    <td>{{ $present['serviceFeeFormatted'] }}</td>
-                </tr>
-                <tr>
-                    <td>Frais bancaires ({{ $present['bankFeePercentageLabel'] }})</td>
-                    <td>{{ $present['bankFeeFormatted'] }}</td>
-                </tr>
-                <tr class="total-due">
-                    <td>TOTAL À PAYER</td>
-                    <td>{{ $present['totalFormatted'] }}</td>
-                </tr>
+                @if($useSnapshot)
+                    <tr>
+                        <td>Sous-total articles</td>
+                        <td>{{ $pdfFmt((float) ($snapshot['subtotal'] ?? 0)) }}</td>
+                    </tr>
+                    <tr>
+                        <td>Frais et services</td>
+                        <td>{{ $pdfFmt((float) ($snapshot['lines_total'] ?? 0)) }}</td>
+                    </tr>
+                    @if(!empty($snapshot['is_urgent']) && !empty($snapshot['urgency_surcharge_percent']))
+                    <tr>
+                        <td>Majoration urgence ({{ $snapshot['urgency_surcharge_percent'] }}%)</td>
+                        <td>{{ $pdfFmt((float) ($snapshot['total_primary'] ?? 0) - (float) ($snapshot['subtotal'] ?? 0) - (float) ($snapshot['lines_total'] ?? 0)) }}</td>
+                    </tr>
+                    @endif
+                    <tr class="total-due">
+                        <td>TOTAL À PAYER</td>
+                        <td>{{ $pdfFmt((float) ($snapshot['total_primary'] ?? 0)) }}</td>
+                    </tr>
+                @else
+                    <tr>
+                        <td>Sous-total articles</td>
+                        <td>{{ $present['linesSubtotalFormatted'] }}</td>
+                    </tr>
+                    <tr>
+                        <td>Frais de service</td>
+                        <td>{{ $present['serviceFeeFormatted'] }}</td>
+                    </tr>
+                    <tr>
+                        <td>Frais bancaires ({{ $present['bankFeePercentageLabel'] }})</td>
+                        <td>{{ $present['bankFeeFormatted'] }}</td>
+                    </tr>
+                    <tr class="total-due">
+                        <td>TOTAL À PAYER</td>
+                        <td>{{ $present['totalFormatted'] }}</td>
+                    </tr>
+                @endif
             </table>
+
+            @if($useSnapshot && !empty($snapshot['total_secondary']) && !empty($snapshot['secondary_currency']))
+                <p class="secondary-total">
+                    Soit {{ number_format((float) $snapshot['total_secondary'], 0, ',', ' ') }} {{ $snapshot['secondary_currency'] }}
+                    (taux : {{ number_format((float) ($snapshot['exchange_rate'] ?? 0), 2, ',', ' ') }})
+                </p>
+            @elseif(!empty($present['totalCdfFormatted']))
+                <p class="secondary-total">Soit {{ $present['totalCdfFormatted'] }}</p>
+            @endif
         </td>
     </tr>
 </table>
 
-<p class="section-label" style="margin-top:18px;">Transparence tarifaire</p>
-<table class="totals" style="width:100%; border:1px solid #e2e2ea; border-radius:8px; padding:10px;">
-    <tr>
-        <td style="text-align:left; width:45%; color:#5c5c6e;">Prix source (devise d'origine)</td>
-        <td style="text-align:right; font-weight:bold;">{{ $present['sourcePriceFormatted'] ?? '—' }}</td>
-    </tr>
-    <tr>
-        <td style="text-align:left; color:#5c5c6e;">Taux appliqué</td>
-        <td style="text-align:right; font-weight:bold;">{{ $present['appliedRateVerbose'] ?? $present['appliedRateLabel'] }}</td>
-    </tr>
-    @if(!empty($present['appliedRateAsOf']))
-    <tr>
-        <td style="text-align:left; color:#5c5c6e;">Taux en vigueur (réf.)</td>
-        <td style="text-align:right; font-weight:bold;">{{ $present['appliedRateAsOf'] }}</td>
-    </tr>
-    @endif
-    <tr>
-        <td style="text-align:left; color:#5c5c6e; vertical-align: top;">Source du taux</td>
-        <td style="text-align:right; font-size: 9pt; color:#333;">{{ $present['appliedRateSourceNote'] ?? '—' }}</td>
-    </tr>
-    <tr>
-        <td style="text-align:left; color:#5c5c6e;">Commission + frais</td>
-        <td style="text-align:right; font-weight:bold;">{{ $present['serviceFeeFormatted'] }} + {{ $present['bankFeeFormatted'] }}</td>
-    </tr>
-    <tr>
-        <td style="text-align:left; color:#5c5c6e;">Total {{ $present['currency'] ?? 'USD' }}</td>
-        <td style="text-align:right; font-weight:bold;">{{ $present['totalFormatted'] }}</td>
-    </tr>
-    <tr>
-        <td style="text-align:left; color:#5c5c6e;">Total CDF</td>
-        <td style="text-align:right; font-weight:bold;">{{ $present['totalCdfFormatted'] ?? '—' }}</td>
-    </tr>
-</table>
+@if(!empty($responseUrl))
+<div class="cta-box">
+    <a href="{{ $responseUrl }}">Accepter ou refuser ce devis en ligne</a>
+</div>
+@elseif(!empty($present['paymentUrl']))
+<div class="cta-box">
+    <a href="{{ $present['paymentUrl'] }}">Consulter mon devis en ligne</a>
+</div>
+@endif
+
+@if($useSnapshot && !empty($snapshot['expires_at']))
+<div class="validity-info">
+    Ce devis est valide jusqu'au <strong>{{ \Carbon\Carbon::parse($snapshot['expires_at'])->format('d/m/Y') }}</strong>.
+    Passé ce délai, il sera automatiquement annulé.
+</div>
+@endif
 
 @if(!empty($qr_data_uri))
 <div style="text-align:center; margin:18px 0 8px;">

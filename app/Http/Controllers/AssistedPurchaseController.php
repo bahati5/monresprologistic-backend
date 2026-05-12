@@ -9,6 +9,8 @@ use App\Mail\AssistedPurchaseQuoteMail;
 use App\Models\Agency;
 use App\Models\AssistedPurchase;
 use App\Models\AssistedPurchaseItem;
+use App\Models\AssistedPurchasePayment;
+use App\Models\QuoteSnapshot;
 use App\Models\Notification;
 use App\Models\Profile;
 use App\Models\Setting;
@@ -18,8 +20,12 @@ use App\Models\User;
 use App\Notifications\AssistedPurchaseOrderedNotification;
 use App\Notifications\QuoteReadyNotification;
 use App\Services\NotificationDispatcher;
+use App\Services\QuoteCalculationService;
+use App\Services\QuoteFollowUpService;
 use App\Support\AssistedPurchaseUrlLabel;
 use App\Support\FrontendPortalUrl;
+use App\Support\QuoteSnapshotDataNormalizer;
+use App\Support\ShipmentDocumentSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -128,11 +134,70 @@ class AssistedPurchaseController extends Controller
             'user.profile.country',
             'operator',
             'items.merchant',
+            'payments.recordedBy',
+            'convertedShipment',
         ]);
 
+        $latestSnapshot = QuoteSnapshot::where('assisted_purchase_id', $assisted_purchase->id)
+            ->orderByDesc('version')
+            ->orderByDesc('id')
+            ->first();
+
+        $snapshotHistory = QuoteSnapshot::where('assisted_purchase_id', $assisted_purchase->id)
+            ->orderByDesc('version')
+            ->orderByDesc('id')
+            ->limit(15)
+            ->get(['id', 'version', 'sent_at', 'total_primary', 'primary_currency', 'revision_reason', 'created_at'])
+            ->map(fn (QuoteSnapshot $s) => [
+                'id' => $s->id,
+                'version' => $s->version,
+                'sent_at' => $s->sent_at?->toIso8601String(),
+                'total_primary' => (string) $s->total_primary,
+                'primary_currency' => $s->primary_currency,
+                'revision_reason' => $s->revision_reason,
+                'created_at' => $s->created_at?->toIso8601String(),
+            ])
+            ->values()
+            ->all();
+
+        $data = $assisted_purchase->toArray();
+        if ($latestSnapshot) {
+            $data['latest_snapshot'] = [
+                'snapshot_data' => $latestSnapshot->snapshot_data,
+                'estimated_delivery' => $latestSnapshot->estimated_delivery,
+                'staff_message' => $latestSnapshot->staff_message,
+                'total_primary' => $latestSnapshot->total_primary,
+                'primary_currency' => $latestSnapshot->primary_currency,
+            ];
+        }
+        $data['quote_snapshot_history'] = $snapshotHistory;
+        $data['dossier_timeline'] = $this->buildDossierTimeline($assisted_purchase);
+
         return response()->json([
-            'purchase' => $assisted_purchase,
+            'purchase' => $data,
         ]);
+    }
+
+    private function assertStaffCanSubmitQuote(AssistedPurchase $purchase): void
+    {
+        $status = $purchase->status;
+        if (! $status instanceof AssistedPurchaseStatus) {
+            throw ValidationException::withMessages([
+                'status' => ['Statut de demande invalide.'],
+            ]);
+        }
+
+        $allowed = [
+            AssistedPurchaseStatus::PENDING_QUOTE,
+            AssistedPurchaseStatus::QUOTED,
+            AssistedPurchaseStatus::AWAITING_PAYMENT,
+        ];
+
+        if (! in_array($status, $allowed, true)) {
+            throw ValidationException::withMessages([
+                'status' => ['Impossible d’envoyer ou de modifier le devis pour ce statut.'],
+            ]);
+        }
     }
 
     public function store(Request $request): JsonResponse
@@ -212,6 +277,8 @@ class AssistedPurchaseController extends Controller
             return $parent->load('items');
         });
 
+        $this->autoExtractItems($purchase);
+
         return response()->json([
             'message' => 'Demande d’achat assisté envoyée.',
             'purchase' => $purchase,
@@ -221,12 +288,62 @@ class AssistedPurchaseController extends Controller
     /**
      * Aperçu HTML du mail de devis (sans enregistrement), pour l’admin.
      */
+    /**
+     * Auto-extract product info from URLs for each item that lacks a proper name.
+     */
+    private function autoExtractItems(AssistedPurchase $purchase): void
+    {
+        $scraper = app(\App\Services\Scraping\ProductScraperService::class);
+
+        foreach ($purchase->items as $item) {
+            $url = trim((string) ($item->url ?? ''));
+            if ($url === '' || ! filter_var($url, FILTER_VALIDATE_URL)) {
+                continue;
+            }
+            if ($item->name && mb_strlen($item->name) > 20) {
+                continue;
+            }
+
+            try {
+                $result = $scraper->scrape($url);
+                if ($result->success && $result->name) {
+                    $item->update(['name' => $result->name]);
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Auto-extract failed', [
+                    'item_id' => $item->id,
+                    'url' => $url,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $purchase->refresh();
+        $firstItem = $purchase->items->first();
+        if ($firstItem && $firstItem->name && $firstItem->name !== $purchase->article_label) {
+            $purchase->update(['article_label' => $firstItem->name]);
+        }
+    }
+
     public function quotePreview(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
     {
         $this->authorizeView($request, $assisted_purchase);
         $this->authorizeStaff($request);
 
         $data = $this->validateQuotePayload($request, $assisted_purchase);
+
+        $dynamicLines = $request->validate([
+            'lines' => ['sometimes', 'array'],
+            'lines.*.internal_code' => ['required_with:lines', 'string', 'max:50'],
+            'lines.*.name' => ['required_with:lines', 'string', 'max:255'],
+            'lines.*.type' => ['required_with:lines', 'in:percentage,fixed_amount,manual'],
+            'lines.*.calculation_base' => ['nullable', 'string'],
+            'lines.*.value' => ['required_with:lines', 'numeric', 'min:0'],
+            'lines.*.is_visible_to_client' => ['boolean'],
+            'estimated_delivery' => ['nullable', 'string', 'max:100'],
+            'staff_message' => ['nullable', 'string', 'max:5000'],
+        ]);
+
         $currency = $this->applicationQuoteCurrency();
 
         $assisted_purchase->load('items');
@@ -239,44 +356,115 @@ class AssistedPurchaseController extends Controller
                 continue;
             }
             $item->unit_price = (float) $row['unit_price'];
+            if (isset($row['quantity'])) {
+                $item->quantity = (int) $row['quantity'];
+            }
             $linesTotal += (float) $row['unit_price'] * (int) $item->quantity;
         }
-
-        $serviceFee = (float) $data['service_fee'];
-        $bankFeePct = array_key_exists('bank_fee_percentage', $data) && $data['bank_fee_percentage'] !== null
-            ? (float) $data['bank_fee_percentage']
-            : 3.0;
-        $bankFeeAmount = ($linesTotal + $serviceFee) * ($bankFeePct / 100.0);
-        $totalAmount = $linesTotal + $serviceFee + $bankFeeAmount;
 
         $rawNote = $data['payment_methods_note'] ?? null;
         $paymentMethodsNote = is_string($rawNote) && trim($rawNote) !== '' ? trim($rawNote) : null;
 
-        $estPreview = $data['estimated_weight_kg'] ?? null;
-        $assisted_purchase->forceFill([
-            'service_fee' => $serviceFee,
-            'bank_fee_percentage' => $bankFeePct,
-            'payment_methods_note' => $paymentMethodsNote,
-            'total_amount' => $totalAmount,
-            'quote_amount' => $totalAmount,
-            'quote_currency' => $currency,
-            'estimated_weight_kg' => $estPreview !== null && $estPreview !== '' ? (float) $estPreview : null,
-        ]);
+        $hasDynamicLines = !empty($dynamicLines['lines']);
 
-        try {
+        if ($hasDynamicLines) {
+            $calcService = app(QuoteCalculationService::class);
+
+            $articles = [];
+            foreach ($data['items'] as $row) {
+                $item = $itemsById->get((int) $row['id']);
+                if ($item) {
+                    $articles[] = [
+                        'id' => $item->id,
+                        'name' => $item->name ?? $item->display_label,
+                        'url' => $item->url,
+                        'unit_price' => (float) $row['unit_price'],
+                        'quantity' => isset($row['quantity']) ? (int) $row['quantity'] : (int) $item->quantity,
+                    ];
+                }
+            }
+
+            $calculationResult = $calcService->calculate($articles, $dynamicLines['lines']);
+            $totalAmount = $calculationResult['total_primary'];
+
+            $assisted_purchase->forceFill([
+                'service_fee' => 0,
+                'bank_fee_percentage' => 0,
+                'payment_methods_note' => $paymentMethodsNote,
+                'total_amount' => $totalAmount,
+                'quote_amount' => $totalAmount,
+                'quote_currency' => $currency,
+            ]);
+
+            $snapshotData = $calcService->buildSnapshot(
+                $articles,
+                $dynamicLines['lines'],
+                $calculationResult,
+                $dynamicLines['estimated_delivery'] ?? null,
+                $dynamicLines['staff_message'] ?? null,
+                false,
+                null,
+            );
+
+            $mail = new AssistedPurchaseQuoteMail($assisted_purchase);
+            $mail->snapshotData = QuoteSnapshotDataNormalizer::toArray($snapshotData);
+            $mail->estimatedDelivery = $dynamicLines['estimated_delivery'] ?? null;
+            $mail->staffMessage = $dynamicLines['staff_message'] ?? null;
+            $mail->totalFormatted = $this->formatMoneyForPreview($totalAmount, $currency);
+
+            $mail->refreshTemplateIntroHtml();
+
+            $html = $mail->render();
+        } else {
+            $serviceFee = (float) $data['service_fee'];
+            $bankFeePct = array_key_exists('bank_fee_percentage', $data) && $data['bank_fee_percentage'] !== null
+                ? (float) $data['bank_fee_percentage']
+                : 3.0;
+            $bankFeeAmount = ($linesTotal + $serviceFee) * ($bankFeePct / 100.0);
+            $totalAmount = $linesTotal + $serviceFee + $bankFeeAmount;
+
+            $assisted_purchase->forceFill([
+                'service_fee' => $serviceFee,
+                'bank_fee_percentage' => $bankFeePct,
+                'payment_methods_note' => $paymentMethodsNote,
+                'total_amount' => $totalAmount,
+                'quote_amount' => $totalAmount,
+                'quote_currency' => $currency,
+            ]);
+
             $html = (new AssistedPurchaseQuoteMail($assisted_purchase))->render();
-        } finally {
-            $assisted_purchase->refresh();
-            $assisted_purchase->load('items');
         }
 
+        $assisted_purchase->refresh();
+        $assisted_purchase->load('items');
+
         return response()->json(['html' => $html]);
+    }
+
+    private function formatMoneyForPreview(float $amount, string $currency): string
+    {
+        $doc = ShipmentDocumentSettings::merged();
+        $symbol = trim((string) ($doc['currency_symbol'] ?? ''));
+        if ($symbol === '') {
+            $symbol = match (strtoupper($currency)) {
+                'EUR' => '€',
+                'USD' => '$',
+                'GBP' => '£',
+                default => $currency,
+            };
+        }
+        $decimals = max(0, min(6, (int) ($doc['decimals'] ?? 2)));
+        $num = number_format($amount, $decimals, ',', ' ');
+        $suffix = ((string) (Setting::getValue('symbol_position', 'prefix') ?: 'prefix')) === 'suffix';
+
+        return $suffix ? $num . "\u{a0}" . $symbol : $symbol . $num;
     }
 
     public function quote(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
     {
         $this->authorizeView($request, $assisted_purchase);
         $this->authorizeStaff($request);
+        $this->assertStaffCanSubmitQuote($assisted_purchase);
 
         $data = $this->validateQuotePayload($request, $assisted_purchase);
         $currency = $this->applicationQuoteCurrency();
@@ -299,8 +487,9 @@ class AssistedPurchaseController extends Controller
                     continue;
                 }
                 $unit = (float) $row['unit_price'];
-                $item->update(['unit_price' => $unit]);
-                $linesTotal += $unit * (int) $item->quantity;
+                $qty = isset($row['quantity']) ? (int) $row['quantity'] : (int) $item->quantity;
+                $item->update(['unit_price' => $unit, 'quantity' => $qty]);
+                $linesTotal += $unit * $qty;
             }
 
             $serviceFee = (float) $data['service_fee'];
@@ -346,7 +535,7 @@ class AssistedPurchaseController extends Controller
             NotificationController::notify(
                 $client->id,
                 'assisted_purchase',
-                'Devis disponible — achat assisté',
+                'Devis envoyé — achat assisté',
                 "Un devis de {$amount} a été établi pour votre demande. Ouvrez votre devis pour consulter le détail et les modalités de paiement.",
                 ['assisted_purchase_id' => $assisted_purchase->id],
                 $purchaseUrl,
@@ -482,51 +671,136 @@ class AssistedPurchaseController extends Controller
     }
 
     /**
-     * Après réception du paiement (hors passerelle en ligne) : passage au statut « Paiement validé ».
+     * Enregistre un encaissement (acompte ou solde). Passe en « Paiement validé » lorsque le cumul couvre le total du devis.
      */
     public function markPaid(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
     {
         $this->authorizeView($request, $assisted_purchase);
         $this->authorizeStaff($request);
 
-        if ($assisted_purchase->status !== AssistedPurchaseStatus::AWAITING_PAYMENT) {
+        if ($assisted_purchase->status === AssistedPurchaseStatus::PAID) {
             throw ValidationException::withMessages([
-                'status' => ['Le paiement ne peut être validé que pour une demande au statut « Devis disponible ».'],
+                'status' => ['Cette demande est déjà marquée comme entièrement payée.'],
             ]);
         }
 
-        $assisted_purchase->update([
-            'status' => AssistedPurchaseStatus::PAID,
-            'paid_at' => now(),
-        ]);
-
-        $assisted_purchase->refresh()->load(['user']);
-        $client = $assisted_purchase->user;
-        $base = FrontendPortalUrl::base();
-        $purchaseUrl = $base.'/purchase-orders/'.$assisted_purchase->id;
-
-        if ($client) {
-            NotificationController::notify(
-                $client->id,
-                'assisted_purchase',
-                'Paiement validé',
-                'Votre paiement pour la demande d’achat assisté n° '.$assisted_purchase->id.' a été validé par notre équipe.',
-                ['assisted_purchase_id' => $assisted_purchase->id],
-                $purchaseUrl,
-                ['in_app']
-            );
+        if (! in_array($assisted_purchase->status, [
+            AssistedPurchaseStatus::QUOTED,
+            AssistedPurchaseStatus::AWAITING_PAYMENT,
+            AssistedPurchaseStatus::ORDERED,
+            AssistedPurchaseStatus::ARRIVED_AT_HUB,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['Les encaissements ne peuvent être enregistrés que sur un dossier actif avec devis (hors annulation / conversion).'],
+            ]);
         }
 
-        return response()->json([
-            'message' => 'Paiement enregistré comme reçu.',
-            'purchase' => $assisted_purchase->load([
-                'user.profile.city',
-                'user.profile.state',
-                'user.profile.country',
-                'operator',
-                'items.merchant',
-            ]),
+        $data = $request->validate([
+            'amount' => ['nullable', 'numeric', 'min:0.01', 'max:99999999.99'],
+            'note' => ['nullable', 'string', 'max:2000'],
         ]);
+
+        $total = (float) ($assisted_purchase->total_amount ?? $assisted_purchase->quote_amount ?? 0);
+        if ($total <= 0) {
+            throw ValidationException::withMessages([
+                'amount' => ['Montant total du devis invalide ou non défini.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($request, $assisted_purchase, $data, $total) {
+            $purchase = AssistedPurchase::query()->whereKey($assisted_purchase->id)->lockForUpdate()->firstOrFail();
+
+            $already = (float) AssistedPurchasePayment::where('assisted_purchase_id', $purchase->id)->sum('amount');
+            $remaining = round(max(0, $total - $already), 2);
+
+            if ($remaining <= 0) {
+                throw ValidationException::withMessages([
+                    'amount' => ['Aucun solde restant à enregistrer sur ce devis.'],
+                ]);
+            }
+
+            $rawAmount = $data['amount'] ?? null;
+            $inputAmount = $rawAmount !== null && $rawAmount !== ''
+                ? round((float) $rawAmount, 2)
+                : $remaining;
+
+            if ($inputAmount <= 0) {
+                throw ValidationException::withMessages(['amount' => ['Montant invalide.']]);
+            }
+
+            if ($inputAmount - $remaining > 0.02) {
+                throw ValidationException::withMessages([
+                    'amount' => [
+                        'Le montant dépasse le solde restant ('.number_format($remaining, 2, ',', ' ').' '.trim((string) ($purchase->quote_currency ?: '')).').',
+                    ],
+                ]);
+            }
+
+            AssistedPurchasePayment::create([
+                'assisted_purchase_id' => $purchase->id,
+                'amount' => $inputAmount,
+                'currency' => $purchase->quote_currency,
+                'note' => isset($data['note']) && is_string($data['note']) && trim($data['note']) !== '' ? trim($data['note']) : null,
+                'recorded_by' => $request->user()->id,
+            ]);
+
+            $newSum = round($already + $inputAmount, 2);
+            $fullyPaid = $newSum + 0.005 >= $total;
+            $oldStatus = $purchase->status;
+
+            if ($fullyPaid) {
+                $purchase->update([
+                    'status' => AssistedPurchaseStatus::PAID,
+                    'paid_at' => $purchase->paid_at ?? now(),
+                ]);
+            }
+
+            $purchase->refresh()->load(['user', 'payments.recordedBy']);
+
+            if ($fullyPaid && $oldStatus !== AssistedPurchaseStatus::PAID) {
+                AssistedPurchaseStatusChanged::dispatch(
+                    $purchase->fresh(['user']),
+                    $oldStatus,
+                    AssistedPurchaseStatus::PAID,
+                    $request->user()
+                );
+            }
+
+            $client = $purchase->user;
+            $base = FrontendPortalUrl::base();
+            $purchaseUrl = $base.'/purchase-orders/'.$purchase->id;
+
+            if ($fullyPaid && $client) {
+                NotificationController::notify(
+                    $client->id,
+                    'assisted_purchase',
+                    'Paiement validé',
+                    'Votre paiement pour la demande d’achat assisté n° '.$purchase->id.' a été validé par notre équipe.',
+                    ['assisted_purchase_id' => $purchase->id],
+                    $purchaseUrl,
+                    ['in_app']
+                );
+            }
+
+            $remainingAfter = max(0, round($total - $newSum, 2));
+            $message = $fullyPaid
+                ? 'Encaissement enregistré. Le dossier est passé en « Paiement validé ».'
+                : 'Encaissement enregistré. Solde restant : '.number_format($remainingAfter, 2, ',', ' ').' '.trim((string) ($purchase->quote_currency ?: '')).'.';
+
+            return response()->json([
+                'message' => $message,
+                'total_paid' => $newSum,
+                'remaining' => $remainingAfter,
+                'purchase' => $purchase->load([
+                    'user.profile.city',
+                    'user.profile.state',
+                    'user.profile.country',
+                    'operator',
+                    'items.merchant',
+                    'payments.recordedBy',
+                ]),
+            ]);
+        });
     }
 
     /**
@@ -734,7 +1008,7 @@ class AssistedPurchaseController extends Controller
 
     /**
      * §13 PRD — Devise de référence des devis.
-     * Priorité : default_quote_currency > settings.currency > USD (PRD impose USD).
+     * Priorité : default_quote_currency > settings.currency (paramètres généraux).
      */
     protected function applicationQuoteCurrency(): string
     {
@@ -745,7 +1019,7 @@ class AssistedPurchaseController extends Controller
 
         $c = Setting::getValue('currency');
 
-        return ($c !== null && trim($c) !== '') ? trim($c) : 'USD';
+        return ($c !== null && trim($c) !== '') ? trim($c) : '';
     }
 
     /**
@@ -766,6 +1040,7 @@ class AssistedPurchaseController extends Controller
                 ),
             ],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'items.*.quantity' => ['nullable', 'integer', 'min:1'],
             'service_fee' => ['required', 'numeric', 'min:0'],
             'bank_fee_percentage' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'payment_methods_note' => ['nullable', 'string', 'max:10000'],
@@ -823,6 +1098,8 @@ class AssistedPurchaseController extends Controller
             ];
         }
 
+        $this->sendQuoteSmsToClient($assisted_purchase, $client);
+
         if (in_array($driver, $nonInboxDrivers, true)) {
             return [
                 'level' => 'warning',
@@ -833,8 +1110,41 @@ class AssistedPurchaseController extends Controller
         return ['level' => 'ok', 'message' => ''];
     }
 
+    protected function sendQuoteSmsToClient(AssistedPurchase $purchase, User $client): void
+    {
+        if (! \App\Services\Twilio\TwilioGateway::smsEnabled()) {
+            return;
+        }
+
+        $phone = $client->phone ?? $client->profile?->phone ?? null;
+        if (! $phone) {
+            return;
+        }
+
+        $total = number_format((float) ($purchase->total_amount ?? 0), 2, '.', ' ');
+        $currency = $purchase->quote_currency ?? 'USD';
+        $ref = 'MRP-AA-' . str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
+        $expiresAt = $purchase->quote_expires_at
+            ? $purchase->quote_expires_at->format('d/m')
+            : '';
+
+        $baseUrl = config('app.frontend_url', 'https://monrespro.cd');
+        $shortLink = $baseUrl . '/d/' . str_replace('MRP-AA-', 'AA', $ref);
+
+        $message = "Monrespro: Votre devis {$ref} est pret. "
+            . "Total: {$total} {$currency}."
+            . ($expiresAt ? " Valable jusqu'au {$expiresAt}." : '')
+            . " Consultez: {$shortLink}";
+
+        try {
+            \App\Services\Twilio\TwilioGateway::sendSms($phone, $message);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("SMS devis failed for AP#{$purchase->id}: {$e->getMessage()}");
+        }
+    }
+
     /**
-     * Convertit un achat assisté (arrivé au hub ou commandé) en expédition logistique.
+     * Convertit un achat assisté au statut « Colis reçu à l'entrepôt » en expédition logistique.
      * Logique métier : L'agence est l'expéditeur, le client est le destinataire.
      * Le client doit avoir un profil complet (adresse, téléphone, pays).
      */
@@ -848,6 +1158,8 @@ class AssistedPurchaseController extends Controller
             'delivery_address' => ['nullable', 'string', 'max:500'],
             'delivery_time_slot' => ['nullable', 'string', 'in:morning,afternoon'],
             'delivery_instructions' => ['nullable', 'string', 'max:500'],
+            /** Agence expéditrice (hub Monrespro) — utile si client / opérateur n’ont pas d’`agency_id` (ex. super admin). */
+            'agency_id' => ['nullable', 'integer', Rule::exists('agencies', 'id')],
         ]);
 
         if ($assisted_purchase->status !== AssistedPurchaseStatus::ARRIVED_AT_HUB) {
@@ -871,13 +1183,7 @@ class AssistedPurchaseController extends Controller
             ]);
         }
 
-        // Load agency with country/city for sender profile
-        $agency = Agency::with(['country', 'city', 'state'])->find($client->agency_id ?? $request->user()->agency_id);
-        if (! $agency) {
-            throw ValidationException::withMessages([
-                'agency' => ['Aucune agence trouvée pour cette conversion.'],
-            ]);
-        }
+        $agency = $this->resolveAgencyForAssistedPurchaseConversion($request, $client);
 
         // Check if client has a complete profile (required for recipient)
         $clientProfileCheck = $this->validateClientProfileComplete($client);
@@ -1052,6 +1358,157 @@ class AssistedPurchaseController extends Controller
             $profileUrl,
             ['in_app', 'email']
         );
+    }
+
+    /**
+     * Chronologie métier du dossier (événements datés) pour l’interface staff.
+     *
+     * @return list<array{at: string, event: string, label: string, meta?: string|null}>
+     */
+    protected function buildDossierTimeline(AssistedPurchase $ap): array
+    {
+        $rows = [];
+
+        if ($ap->created_at) {
+            $rows[] = [
+                'at' => $ap->created_at->toIso8601String(),
+                'event' => 'created',
+                'label' => 'Demande créée',
+            ];
+        }
+
+        if ($ap->quoted_at) {
+            $qv = $ap->quote_version;
+            $meta = is_numeric($qv) && (int) $qv > 0 ? 'Version '.(int) $qv : null;
+            $rows[] = [
+                'at' => $ap->quoted_at->toIso8601String(),
+                'event' => 'quoted',
+                'label' => 'Devis publié / envoyé',
+                'meta' => $meta,
+            ];
+        }
+
+        foreach ($ap->payments ?? [] as $pay) {
+            if (! $pay->created_at) {
+                continue;
+            }
+            $rows[] = [
+                'at' => $pay->created_at->toIso8601String(),
+                'event' => 'payment',
+                'label' => 'Encaissement enregistré',
+                'meta' => trim((string) ($pay->amount ?? '')).' '.trim((string) ($pay->currency ?? '')),
+            ];
+        }
+
+        if ($ap->paid_at) {
+            $rows[] = [
+                'at' => $ap->paid_at->toIso8601String(),
+                'event' => 'paid',
+                'label' => 'Statut « payé » atteint',
+            ];
+        }
+
+        if ($ap->purchased_at) {
+            $rows[] = [
+                'at' => $ap->purchased_at->toIso8601String(),
+                'event' => 'ordered',
+                'label' => 'Commande fournisseur enregistrée',
+            ];
+        }
+
+        if ($ap->hub_received_weight_kg !== null && (float) $ap->hub_received_weight_kg > 0) {
+            $rows[] = [
+                'at' => ($ap->updated_at ?? $ap->created_at ?? now())->toIso8601String(),
+                'event' => 'hub',
+                'label' => 'Colis réceptionné à l\'entrepôt',
+                'meta' => (string) $ap->hub_received_weight_kg.' kg',
+            ];
+        }
+
+        if ($ap->converted_shipment_id && $ap->relationLoaded('convertedShipment') && $ap->convertedShipment?->created_at) {
+            $rows[] = [
+                'at' => $ap->convertedShipment->created_at->toIso8601String(),
+                'event' => 'converted',
+                'label' => 'Converti en expédition logistique',
+                'meta' => '#'.$ap->converted_shipment_id,
+            ];
+        }
+
+        usort($rows, fn (array $a, array $b): int => strcmp($a['at'], $b['at']));
+
+        return array_reverse($rows);
+    }
+
+    /**
+     * Agence expéditrice (profil expéditeur Monrespro) pour la conversion en expédition.
+     * Ordre : `agency_id` (corps, si autorisé), client.user, client.profile, opérateur, puis repli contrôlé.
+     */
+    protected function resolveAgencyForAssistedPurchaseConversion(Request $request, User $client): Agency
+    {
+        $staff = $request->user();
+        $client->loadMissing('profile');
+        $staff->loadMissing('profile');
+
+        $candidateIds = [];
+        if ($request->filled('agency_id')) {
+            $candidateIds[] = (int) $request->input('agency_id');
+        }
+        if ($client->agency_id) {
+            $candidateIds[] = (int) $client->agency_id;
+        }
+        if ($client->profile?->agency_id) {
+            $candidateIds[] = (int) $client->profile->agency_id;
+        }
+        if ($staff->agency_id) {
+            $candidateIds[] = (int) $staff->agency_id;
+        }
+        if ($staff->profile?->agency_id) {
+            $candidateIds[] = (int) $staff->profile->agency_id;
+        }
+
+        $candidateIds = array_values(array_unique(array_filter($candidateIds)));
+
+        foreach ($candidateIds as $agencyId) {
+            $agency = Agency::with(['country', 'city', 'state'])->where('is_active', true)->find($agencyId);
+            if ($agency && $this->staffMayUseAgencyForAssistedPurchaseConversion($staff, $agency, $client)) {
+                return $agency;
+            }
+        }
+
+        if ($staff->canAccessAllAgencies()) {
+            $fallback = Agency::with(['country', 'city', 'state'])->where('is_active', true)->orderBy('id')->first();
+            if ($fallback) {
+                return $fallback;
+            }
+        }
+
+        $staffAgencyId = (int) ($staff->agency_id ?? $staff->profile?->agency_id ?? 0);
+        if ($staffAgencyId > 0) {
+            $agency = Agency::with(['country', 'city', 'state'])->where('is_active', true)->find($staffAgencyId);
+            if ($agency) {
+                return $agency;
+            }
+        }
+
+        throw ValidationException::withMessages([
+            'agency' => ['Aucune agence trouvée pour cette conversion. Indiquez `agency_id` (agence active) ou rattachez le client / votre compte à une agence.'],
+        ]);
+    }
+
+    protected function staffMayUseAgencyForAssistedPurchaseConversion(User $staff, Agency $agency, User $client): bool
+    {
+        if ($staff->canAccessAllAgencies()) {
+            return true;
+        }
+
+        $staffAgencyId = (int) ($staff->agency_id ?? $staff->profile?->agency_id ?? 0);
+        if ($staffAgencyId > 0 && (int) $agency->id === $staffAgencyId) {
+            return true;
+        }
+
+        $clientAgencyId = (int) ($client->agency_id ?? $client->profile?->agency_id ?? 0);
+
+        return $clientAgencyId > 0 && (int) $agency->id === $clientAgencyId;
     }
 
     /**
@@ -1313,5 +1770,413 @@ class AssistedPurchaseController extends Controller
             'status' => 'done',
             'product' => $result,
         ]);
+    }
+
+    /**
+     * Send quote using the dynamic line engine (PRD v2).
+     * Accepts structured lines instead of flat service_fee + bank_fee.
+     */
+    public function quoteDynamic(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
+    {
+        $this->authorizeView($request, $assisted_purchase);
+        $this->authorizeStaff($request);
+        $this->assertStaffCanSubmitQuote($assisted_purchase);
+
+        $data = $request->validate([
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.id' => ['required', 'integer', 'exists:assisted_purchase_items,id'],
+            'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'items.*.quantity' => ['sometimes', 'integer', 'min:1'],
+            'items.*.availability_status' => ['required', 'string', 'in:exact,available_alternative,unavailable,not_checked'],
+            'items.*.alternative_note' => ['nullable', 'string', 'max:1000'],
+            'lines' => ['required', 'array'],
+            'lines.*.internal_code' => ['required', 'string', 'max:50'],
+            'lines.*.name' => ['required', 'string', 'max:255'],
+            'lines.*.type' => ['required', 'in:percentage,fixed_amount,manual'],
+            'lines.*.calculation_base' => ['nullable', 'string'],
+            'lines.*.value' => ['required', 'numeric', 'min:0'],
+            'lines.*.is_visible_to_client' => ['boolean'],
+            'is_urgent' => ['boolean'],
+            'urgency_surcharge_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'estimated_delivery' => ['nullable', 'string', 'max:100'],
+            'staff_message' => ['nullable', 'string', 'max:5000'],
+            'revision_reason' => ['nullable', 'string', 'max:500'],
+            'estimated_weight_kg' => ['nullable', 'numeric', 'min:0.001', 'max:99999'],
+            'payment_methods_note' => ['nullable', 'string', 'max:10000'],
+        ]);
+
+        $alternativeWithoutNote = collect($data['items'])
+            ->filter(fn ($item) => $item['availability_status'] === 'available_alternative' && empty($item['alternative_note']));
+        if ($alternativeWithoutNote->isNotEmpty()) {
+            return response()->json([
+                'message' => 'Une note explicative est requise pour les articles en alternative.',
+            ], 422);
+        }
+
+        $calcService = app(QuoteCalculationService::class);
+        $followUpService = app(QuoteFollowUpService::class);
+
+        $articles = [];
+        $assisted_purchase->loadMissing('items');
+        $itemsById = $assisted_purchase->items->keyBy('id');
+
+        foreach ($data['items'] as $row) {
+            $item = $itemsById->get((int) $row['id']);
+            if ($item) {
+                $updateData = ['unit_price' => (float) $row['unit_price']];
+                if (isset($row['quantity'])) {
+                    $updateData['quantity'] = (int) $row['quantity'];
+                }
+                $item->update($updateData);
+                $articles[] = [
+                    'id' => $item->id,
+                    'name' => $item->name ?? $item->display_label,
+                    'url' => $item->url,
+                    'unit_price' => (float) $row['unit_price'],
+                    'quantity' => isset($row['quantity']) ? (int) $row['quantity'] : (int) $item->quantity,
+                    'availability_status' => $row['availability_status'],
+                    'alternative_note' => $row['alternative_note'] ?? null,
+                ];
+            }
+        }
+
+        $calculationResult = $calcService->calculate($articles, $data['lines']);
+
+        $isUrgent = $data['is_urgent'] ?? false;
+        $urgencySurcharge = $data['urgency_surcharge_percent'] ?? null;
+
+        $snapshotData = $calcService->buildSnapshot(
+            $articles,
+            $data['lines'],
+            $calculationResult,
+            $data['estimated_delivery'] ?? null,
+            $data['staff_message'] ?? null,
+            $isUrgent,
+            $urgencySurcharge,
+        );
+
+        try {
+            $snapshot = $followUpService->sendQuote(
+                $assisted_purchase,
+                $snapshotData,
+                $articles,
+                $calculationResult,
+                $request->user()->id,
+                $isUrgent,
+                $urgencySurcharge,
+                $data['estimated_delivery'] ?? null,
+                $data['staff_message'] ?? null,
+                $data['revision_reason'] ?? null,
+            );
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $extraUpdates = ['operator_id' => $request->user()->id];
+        $quoteCurrency = $calculationResult['primary_currency'] ?? $this->applicationQuoteCurrency();
+        if ($quoteCurrency !== '') {
+            $extraUpdates['quote_currency'] = $quoteCurrency;
+        }
+        if (isset($data['estimated_weight_kg'])) {
+            $extraUpdates['estimated_weight_kg'] = (float) $data['estimated_weight_kg'];
+        }
+        $rawNote = $data['payment_methods_note'] ?? null;
+        if (is_string($rawNote) && trim($rawNote) !== '') {
+            $extraUpdates['payment_methods_note'] = trim($rawNote);
+        }
+        $assisted_purchase->update($extraUpdates);
+
+        $assisted_purchase->refresh()->load(['items', 'user']);
+        $mailStatus = $this->sendQuoteReadyNotificationToClient($assisted_purchase);
+
+        $client = $assisted_purchase->user;
+        if ($client) {
+            $base = FrontendPortalUrl::base();
+            $purchaseUrl = $base . '/purchase-orders/' . $assisted_purchase->id;
+            $amount = number_format((float) $calculationResult['total_primary'], 2, ',', ' ')
+                . ' ' . $calculationResult['primary_currency'];
+            NotificationController::notify(
+                $client->id,
+                'assisted_purchase',
+                'Devis envoyé — achat assisté',
+                "Un devis de {$amount} a été établi pour votre demande.",
+                ['assisted_purchase_id' => $assisted_purchase->id],
+                $purchaseUrl,
+                ['in_app']
+            );
+        }
+
+        return response()->json([
+            'message' => 'Devis enregistré et envoyé.',
+            'snapshot_id' => $snapshot->id,
+            'total' => $calculationResult['total_primary'],
+            'mail_status' => $mailStatus,
+        ]);
+    }
+
+    /**
+     * Create a new revision of an existing quote.
+     */
+    public function createRevision(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
+    {
+        $this->authorizeView($request, $assisted_purchase);
+        $this->authorizeStaff($request);
+
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+
+        $followUpService = app(QuoteFollowUpService::class);
+
+        try {
+            $newVersion = $followUpService->createRevision($assisted_purchase, $data['reason']);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => "Version {$newVersion} créée.",
+            'version' => $newVersion,
+        ]);
+    }
+
+    /**
+     * Send a clarification request to the client.
+     */
+    public function sendClarification(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
+    {
+        $this->authorizeView($request, $assisted_purchase);
+        $this->authorizeStaff($request);
+
+        $data = $request->validate([
+            'message' => ['required', 'string', 'min:10', 'max:5000'],
+            'channels' => ['required', 'array', 'min:1'],
+            'channels.*' => ['string', 'in:email,sms'],
+        ]);
+
+        $followUpService = app(QuoteFollowUpService::class);
+        $followUpService->sendClarification($assisted_purchase, $data['message'], $data['channels']);
+
+        return response()->json(['message' => 'Demande de clarification envoyée.']);
+    }
+
+    /**
+     * Mark an item as out of stock after the order was placed.
+     * Staff provides resolution options for the client.
+     */
+    public function reportItemUnavailable(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
+    {
+        $this->authorizeView($request, $assisted_purchase);
+        $this->authorizeStaff($request);
+
+        if (! in_array($assisted_purchase->status, [
+            AssistedPurchaseStatus::PAID,
+            AssistedPurchaseStatus::ORDERED,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['Cette action est uniquement disponible pour les dossiers au statut Payé ou Commandé.'],
+            ]);
+        }
+
+        $data = $request->validate([
+            'item_id' => ['required', 'integer', 'exists:assisted_purchase_items,id'],
+            'resolution' => ['required', 'string', 'in:wait_restock,propose_alternative,partial_refund,full_refund'],
+            'restock_date' => ['nullable', 'date', 'after:today'],
+            'alternative_description' => ['nullable', 'string', 'max:1000'],
+            'staff_note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $item = AssistedPurchaseItem::where('id', $data['item_id'])
+            ->where('assisted_purchase_id', $assisted_purchase->id)
+            ->firstOrFail();
+
+        $resolution = $data['resolution'];
+        $updateData = [
+            'availability_status' => 'unavailable_after_order',
+            'unavailability_resolution' => $resolution,
+            'unavailability_reported_at' => now(),
+            'unavailability_reported_by' => $request->user()->id,
+        ];
+
+        if ($resolution === 'wait_restock' && isset($data['restock_date'])) {
+            $updateData['restock_estimated_date'] = $data['restock_date'];
+        }
+        if ($resolution === 'propose_alternative' && isset($data['alternative_description'])) {
+            $updateData['alternative_description'] = $data['alternative_description'];
+        }
+
+        $options = $item->options ?? [];
+        $options['unavailability'] = array_filter([
+            'resolution' => $resolution,
+            'restock_date' => $data['restock_date'] ?? null,
+            'alternative' => $data['alternative_description'] ?? null,
+            'staff_note' => $data['staff_note'] ?? null,
+            'reported_at' => now()->toIso8601String(),
+            'reported_by' => $request->user()->id,
+        ]);
+        $item->update(['options' => $options]);
+
+        $client = $assisted_purchase->user;
+        if ($client) {
+            $itemLabel = $item->name ?? $item->display_label ?? "Article #{$item->id}";
+            $resolutionLabels = [
+                'wait_restock' => 'Attente de réapprovisionnement',
+                'propose_alternative' => 'Alternative proposée',
+                'partial_refund' => 'Remboursement partiel',
+                'full_refund' => 'Remboursement intégral',
+            ];
+
+            $base = FrontendPortalUrl::base();
+            $purchaseUrl = $base . '/purchase-orders/' . $assisted_purchase->id;
+
+            NotificationController::notify(
+                $client->id,
+                'assisted_purchase',
+                "Article indisponible : {$itemLabel}",
+                "L'article \"{$itemLabel}\" de votre commande n'est plus disponible. "
+                    . "Résolution : " . ($resolutionLabels[$resolution] ?? $resolution) . ". "
+                    . "Consultez votre espace pour plus de détails.",
+                [
+                    'assisted_purchase_id' => $assisted_purchase->id,
+                    'item_id' => $item->id,
+                    'resolution' => $resolution,
+                ],
+                $purchaseUrl,
+                ['in_app']
+            );
+
+            if ($client->email) {
+                $this->sendItemUnavailableEmail($assisted_purchase, $item, $client, $data);
+            }
+        }
+
+        if ($resolution === 'full_refund') {
+            $assisted_purchase->update([
+                'status' => AssistedPurchaseStatus::CANCELLED,
+                'cancellation_reason' => 'full_refund_item_unavailable',
+            ]);
+        }
+
+        $assisted_purchase->refresh()->load(['items.merchant', 'user.profile']);
+
+        return response()->json([
+            'message' => 'Indisponibilité signalée. Le client a été notifié.',
+            'purchase' => $assisted_purchase,
+        ]);
+    }
+
+    /**
+     * Handle a supplier price change after the quote was accepted.
+     * Creates a new quote revision requiring client re-acceptance.
+     */
+    public function reportPriceChange(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
+    {
+        $this->authorizeView($request, $assisted_purchase);
+        $this->authorizeStaff($request);
+
+        if (! in_array($assisted_purchase->status, [
+            AssistedPurchaseStatus::AWAITING_PAYMENT,
+            AssistedPurchaseStatus::PAID,
+            AssistedPurchaseStatus::ORDERED,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['La révision de prix est uniquement disponible pour les dossiers actifs après envoi de devis.'],
+            ]);
+        }
+
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'min:10', 'max:2000'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.id' => ['required', 'integer', 'exists:assisted_purchase_items,id'],
+            'items.*.new_price' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $assisted_purchase->loadMissing('items');
+        $itemsById = $assisted_purchase->items->keyBy('id');
+
+        foreach ($data['items'] as $row) {
+            $item = $itemsById->get((int) $row['id']);
+            if ($item && $item->assisted_purchase_id === $assisted_purchase->id) {
+                $item->update(['unit_price' => (float) $row['new_price']]);
+            }
+        }
+
+        $assisted_purchase->update([
+            'status' => AssistedPurchaseStatus::QUOTED,
+            'quote_expires_at' => null,
+            'reminder_count' => 0,
+        ]);
+
+        $followUpService = app(QuoteFollowUpService::class);
+        try {
+            $newVersion = $followUpService->createRevision($assisted_purchase, $data['reason']);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $client = $assisted_purchase->user;
+        if ($client) {
+            $base = FrontendPortalUrl::base();
+            $purchaseUrl = $base . '/purchase-orders/' . $assisted_purchase->id;
+
+            NotificationController::notify(
+                $client->id,
+                'assisted_purchase',
+                'Devis révisé — changement de prix fournisseur',
+                "Le prix d'un ou plusieurs articles a changé chez le fournisseur. "
+                    . "Un nouveau devis (v{$newVersion}) vous a été envoyé. "
+                    . "Votre acceptation est requise.",
+                [
+                    'assisted_purchase_id' => $assisted_purchase->id,
+                    'version' => $newVersion,
+                    'reason' => 'price_change',
+                ],
+                $purchaseUrl,
+                ['in_app']
+            );
+        }
+
+        return response()->json([
+            'message' => "Révision v{$newVersion} créée suite au changement de prix. Le client doit re-accepter.",
+            'version' => $newVersion,
+        ]);
+    }
+
+    private function sendItemUnavailableEmail(
+        AssistedPurchase $purchase,
+        AssistedPurchaseItem $item,
+        User $client,
+        array $data
+    ): void {
+        $itemLabel = $item->name ?? $item->display_label ?? "Article #{$item->id}";
+        $resolution = $data['resolution'];
+        $ref = 'MRP-AA-' . str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
+
+        $resolutionMessages = [
+            'wait_restock' => 'Nous attendons le réapprovisionnement.'
+                . (isset($data['restock_date']) ? " Date estimée : {$data['restock_date']}." : ''),
+            'propose_alternative' => 'Nous vous proposons une alternative : '
+                . ($data['alternative_description'] ?? 'voir détails dans votre espace.'),
+            'partial_refund' => 'L\'article sera retiré de votre commande et le montant correspondant vous sera remboursé.',
+            'full_refund' => 'Votre commande est annulée et un remboursement intégral sera effectué.',
+        ];
+
+        $body = "Bonjour {$client->name},\n\n"
+            . "Concernant votre commande {$ref}, l'article \"{$itemLabel}\" n'est malheureusement plus disponible.\n\n"
+            . ($resolutionMessages[$resolution] ?? '')
+            . "\n\n"
+            . ($data['staff_note'] ?? '')
+            . "\n\nConnectez-vous sur votre espace Monrespro pour plus de détails.\n\n"
+            . "L'équipe Monrespro";
+
+        $subject = "Monrespro — Article indisponible — {$ref}";
+
+        try {
+            \Illuminate\Support\Facades\Mail::raw($body, function ($m) use ($client, $subject) {
+                $m->to($client->email)->subject($subject);
+            });
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Email item unavailable failed for AP#{$purchase->id}: {$e->getMessage()}");
+        }
     }
 }

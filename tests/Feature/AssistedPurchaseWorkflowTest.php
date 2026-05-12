@@ -193,6 +193,7 @@ class AssistedPurchaseWorkflowTest extends TestCase
             'product_url' => 'https://example.com/product',
             'article_label' => 'Produit Test',
             'quote_amount' => 150.00,
+            'total_amount' => 150.00,
             'quote_currency' => 'USD',
         ]);
 
@@ -218,7 +219,7 @@ class AssistedPurchaseWorkflowTest extends TestCase
         // Étape 2 : Operator valide le paiement
         Sanctum::actingAs($operator);
         $response = $this->postJson("/api/assisted-purchases/{$purchase->id}/mark-paid", [
-            'notes' => 'Paiement confirmé',
+            'note' => 'Paiement confirmé',
         ]);
 
         $response->assertOk();

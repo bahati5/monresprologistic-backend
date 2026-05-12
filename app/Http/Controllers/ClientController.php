@@ -136,7 +136,6 @@ class ClientController extends Controller
             'phone' => ['required', 'string', 'max:64'],
             'phone_secondary' => ['nullable', 'string', 'max:64'],
             'password' => [
-                Rule::requiredIf($createPortal),
                 'nullable',
                 Rules\Password::defaults(),
             ],
@@ -218,6 +217,9 @@ class ClientController extends Controller
 
             if ($createPortal && ! $profile->user) {
                 $fullName = trim($data['first_name'].' '.$data['last_name']);
+                $password = ! empty($data['password'])
+                    ? $data['password']
+                    : \Illuminate\Support\Str::random(32);
                 $portalUser = User::create([
                     'profile_id' => $profile->id,
                     'name' => $fullName,
@@ -226,11 +228,16 @@ class ClientController extends Controller
                     'email' => $data['email'],
                     'phone' => $data['phone'],
                     'phone_mobile' => $data['phone_secondary'] ?? null,
-                    'password' => Hash::make($data['password']),
+                    'password' => Hash::make($password),
                     'agency_id' => $agencyId,
                     'email_verified_at' => now(),
                 ]);
                 $portalUser->assignRole('client');
+
+                if (empty($data['password'])) {
+                    $token = app('auth.password.broker')->createToken($portalUser);
+                    $portalUser->sendPasswordResetNotification($token);
+                }
             }
 
             $lockerNumber = LockerNumberGenerator::generate();
@@ -346,13 +353,17 @@ class ClientController extends Controller
 
         $data = $request->validate([
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
-            'password' => ['required', Rules\Password::defaults()],
+            'password' => ['nullable', Rules\Password::defaults()],
         ]);
 
         $portalUser = DB::transaction(function () use ($data, $client) {
             if (! $client->email) {
                 $client->update(['email' => $data['email']]);
             }
+
+            $password = ! empty($data['password'])
+                ? $data['password']
+                : \Illuminate\Support\Str::random(32);
 
             $newUser = User::create([
                 'profile_id' => $client->id,
@@ -362,7 +373,7 @@ class ClientController extends Controller
                 'email' => $data['email'],
                 'phone' => $client->phone,
                 'phone_mobile' => $client->phone_secondary,
-                'password' => Hash::make($data['password']),
+                'password' => Hash::make($password),
                 'agency_id' => $client->agency_id,
                 'email_verified_at' => now(),
             ]);
@@ -378,8 +389,13 @@ class ClientController extends Controller
             return $newUser;
         });
 
+        if (empty($data['password'])) {
+            $token = app('auth.password.broker')->createToken($portalUser);
+            $portalUser->sendPasswordResetNotification($token);
+        }
+
         return response()->json([
-            'message' => 'Compte portail créé pour ce client.',
+            'message' => 'Compte portail créé pour ce client. Un e-mail a été envoyé.',
             'client' => new ProfileResource($client->fresh(['user'])),
         ]);
     }

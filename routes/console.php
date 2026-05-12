@@ -12,6 +12,9 @@ Artisan::command('inspire', function () {
 Schedule::command('quotes:expire')->hourly();
 Schedule::command('quotes:remind-expiring')->hourly();
 
+// PRD Achat Assisté — Relances automatiques des devis en attente
+Schedule::job(new \App\Jobs\SendQuoteReminderJob)->everyThreeHours();
+
 // §8.5 — Rapport de tournée chauffeur automatique en fin de journée
 Schedule::command('pickups:daily-report')->dailyAt('20:00');
 

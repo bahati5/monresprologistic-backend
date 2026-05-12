@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AssistedPurchase;
 use App\Models\Pickup;
 use App\Models\PreAlert;
 use App\Models\Regroupement;
@@ -443,6 +444,143 @@ class PdfController extends Controller
             'sum_length' => round($sumLength, 2),
             'sum_width' => round($sumWidth, 2),
             'sum_height' => round($sumHeight, 2),
+        ];
+    }
+
+    /**
+     * §11 — PDF generation for assisted purchase quote.
+     */
+    public function assistedPurchaseQuote(AssistedPurchase $assisted_purchase): Response
+    {
+        $data = $this->assistedPurchaseQuoteData($assisted_purchase, false);
+        $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
+
+        $pdf = Pdf::loadView('pdf.assisted-purchase-quote', $data);
+        $this->enableRemoteAssets($pdf);
+
+        $ref = str_pad((string) $assisted_purchase->id, 6, '0', STR_PAD_LEFT);
+
+        return $pdf->stream("devis-achat-assiste-{$ref}.pdf");
+    }
+
+    /**
+     * §11 — HTML preview for assisted purchase quote.
+     */
+    public function previewAssistedPurchaseQuote(AssistedPurchase $assisted_purchase): JsonResponse
+    {
+        $data = $this->assistedPurchaseQuoteData($assisted_purchase, true);
+        $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
+        $html = view('pdf.assisted-purchase-quote', $data)->render();
+
+        return response()->json([
+            'html' => $html,
+            'purchase_id' => $assisted_purchase->id,
+        ]);
+    }
+
+    /**
+     * Build view data for assisted purchase quote PDF/preview.
+     *
+     * @return array<string, mixed>
+     */
+    private function assistedPurchaseQuoteData(AssistedPurchase $purchase, bool $isPreview): array
+    {
+        $purchase->loadMissing(['items', 'user']);
+        $doc = ShipmentDocumentSettings::all();
+
+        $snapshot = null;
+        $latestSnapshot = $purchase->latestSnapshot;
+        if ($latestSnapshot) {
+            $snapshotData = is_string($latestSnapshot->snapshot_data)
+                ? json_decode($latestSnapshot->snapshot_data, true)
+                : $latestSnapshot->snapshot_data;
+
+            $snapshot = array_merge($snapshotData ?? [], [
+                'version' => $latestSnapshot->version,
+                'total_primary' => (float) $latestSnapshot->total_primary,
+                'total_secondary' => $latestSnapshot->total_secondary ? (float) $latestSnapshot->total_secondary : null,
+                'secondary_currency' => $latestSnapshot->secondary_currency,
+                'exchange_rate' => $latestSnapshot->exchange_rate_used ? (float) $latestSnapshot->exchange_rate_used : null,
+                'is_urgent' => (bool) $latestSnapshot->is_urgent,
+                'urgency_surcharge_percent' => $latestSnapshot->urgency_surcharge_percent,
+                'estimated_delivery' => $latestSnapshot->estimated_delivery,
+                'staff_message' => $latestSnapshot->staff_message,
+                'expires_at' => $latestSnapshot->expires_at?->toIso8601String(),
+            ]);
+        }
+
+        $user = $purchase->user;
+        $lineNotes = json_decode($purchase->line_notes ?? '{}', true);
+
+        $clientRows = [];
+        $clientName = $user?->name ?? $lineNotes['full_name'] ?? '—';
+        $clientRows[] = ['label' => 'Nom', 'value' => $clientName];
+        $clientEmail = $user?->email ?? $lineNotes['email'] ?? null;
+        if ($clientEmail) {
+            $clientRows[] = ['label' => 'Email', 'value' => $clientEmail];
+        }
+        $clientPhone = $user?->phone ?? $lineNotes['phone'] ?? null;
+        if ($clientPhone) {
+            $clientRows[] = ['label' => 'Téléphone', 'value' => $clientPhone];
+        }
+
+        $quotedAt = $purchase->quoted_at ?? $purchase->created_at;
+        $quotedAtFormatted = $quotedAt ? $quotedAt->format('d/m/Y') : now()->format('d/m/Y');
+
+        $sym = trim((string) ($doc['currency_symbol'] ?? '$'));
+        $pos = (string) (Setting::getValue('symbol_position', 'prefix') ?: 'prefix');
+        $dec = max(0, min(6, (int) ($doc['decimals'] ?? 2)));
+
+        $fmt = function (float $n) use ($sym, $pos, $dec): string {
+            $num = number_format($n, $dec, ',', ' ');
+            $sp = html_entity_decode('&nbsp;', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            return $pos === 'suffix' ? $num . $sp . $sym : $sym . $num;
+        };
+
+        $subtotal = 0;
+        foreach ($purchase->items as $item) {
+            $subtotal += (float) $item->unit_price * (int) $item->quantity;
+        }
+
+        $serviceFee = round($subtotal * 0.10, 2);
+        $bankFee = round(($subtotal + $serviceFee) * 0.035, 2);
+        $total = $subtotal + $serviceFee + $bankFee;
+
+        $responseUrl = null;
+        if ($latestSnapshot && $latestSnapshot->response_token) {
+            $responseUrl = rtrim(config('app.frontend_url', config('app.url')), '/')
+                . '/quote-response?token=' . $latestSnapshot->response_token;
+        }
+
+        $qrData = rtrim(config('app.frontend_url', config('app.url')), '/')
+            . '/purchase-orders/' . $purchase->id;
+        $qrDataUri = null;
+        if (class_exists(QrCodeHelper::class)) {
+            try {
+                $qrDataUri = QrCodeHelper::toDataUri($qrData);
+            } catch (\Throwable) {
+            }
+        }
+
+        return [
+            'purchase' => $purchase,
+            'snapshot' => $snapshot,
+            'quotedAtFormatted' => $quotedAtFormatted,
+            'clientRows' => $clientRows,
+            'responseUrl' => $responseUrl,
+            'qr_data_uri' => $qrDataUri,
+            'present' => [
+                'doc' => $doc,
+                'linesSubtotalFormatted' => $fmt($subtotal),
+                'serviceFeeFormatted' => $fmt($serviceFee),
+                'bankFeePercentageLabel' => '3.5%',
+                'bankFeeFormatted' => $fmt($bankFee),
+                'totalFormatted' => $fmt($total),
+                'totalCdfFormatted' => null,
+                'paymentMethodsNote' => null,
+                'paymentUrl' => null,
+            ],
+            'doc' => $doc,
         ];
     }
 

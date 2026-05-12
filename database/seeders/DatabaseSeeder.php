@@ -21,6 +21,7 @@ class DatabaseSeeder extends Seeder
             PickupFailureReasonsSeeder::class,
             MerchantSeeder::class,
             LogisticsSeeder::class,
+            FullPlatformSeeder::class,
         ]);
     }
 }

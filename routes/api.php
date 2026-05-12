@@ -4,7 +4,10 @@ use App\Http\Controllers\AddressBookController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\LocationCascadeController;
 use App\Http\Controllers\Api\ShipmentWizardController;
+use App\Http\Controllers\AssistedPurchaseAnalyticsController;
 use App\Http\Controllers\AssistedPurchaseController;
+use App\Http\Controllers\AssistedPurchasePublicController;
+use App\Http\Controllers\InboundEmailController;
 use App\Http\Controllers\BackupController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\CustomerPackageController;
@@ -46,6 +49,11 @@ use App\Http\Controllers\Settings\TwilioConfigController;
 use App\Http\Controllers\Settings\PickupFailureReasonController;
 use App\Http\Controllers\Settings\RolePermissionController;
 use App\Http\Controllers\Settings\ZoneController;
+use App\Http\Controllers\QuoteDashboardController;
+use App\Http\Controllers\QuoteResponseController;
+use App\Http\Controllers\Settings\QuoteLineTemplateController;
+use App\Http\Controllers\Settings\QuoteSettingsController;
+use App\Http\Controllers\Settings\QuoteTemplateController;
 use App\Http\Controllers\ShipmentController;
 use App\Http\Controllers\ShipmentNoticeController;
 use App\Http\Controllers\ThemeController;
@@ -164,6 +172,72 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('assisted-purchases/extract-product/{cacheKey}', [AssistedPurchaseController::class, 'extractProductResult']);
     Route::post('assisted-purchases/{assisted_purchase}/convert-to-shipment', [AssistedPurchaseController::class, 'convertToShipment'])
         ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/quote-dynamic', [AssistedPurchaseController::class, 'quoteDynamic'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/revision', [AssistedPurchaseController::class, 'createRevision'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/clarification', [AssistedPurchaseController::class, 'sendClarification'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/report-item-unavailable', [AssistedPurchaseController::class, 'reportItemUnavailable'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('assisted-purchases/{assisted_purchase}/report-price-change', [AssistedPurchaseController::class, 'reportPriceChange'])
+        ->middleware('permission:manage_assisted_purchases');
+
+    // --- Quote Line Templates (Settings) ---
+    Route::get('quote-line-templates', [QuoteLineTemplateController::class, 'index'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::get('quote-line-templates/active', [QuoteLineTemplateController::class, 'active'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('quote-line-templates', [QuoteLineTemplateController::class, 'store'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::put('quote-line-templates/{quoteLineTemplate}', [QuoteLineTemplateController::class, 'update'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::delete('quote-line-templates/{quoteLineTemplate}', [QuoteLineTemplateController::class, 'destroy'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('quote-line-templates/reorder', [QuoteLineTemplateController::class, 'reorder'])
+        ->middleware('permission:manage_assisted_purchases');
+
+    // --- Quote Templates (Settings) ---
+    Route::get('quote-templates', [QuoteTemplateController::class, 'index'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('quote-templates', [QuoteTemplateController::class, 'store'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::put('quote-templates/{quoteTemplate}', [QuoteTemplateController::class, 'update'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::delete('quote-templates/{quoteTemplate}', [QuoteTemplateController::class, 'destroy'])
+        ->middleware('permission:manage_assisted_purchases');
+
+    // --- Quote Settings (currency, follow-up, email templates, audit) ---
+    Route::get('settings/quote-currency', [QuoteSettingsController::class, 'currency'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::put('settings/quote-currency', [QuoteSettingsController::class, 'updateCurrency'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::get('settings/quote-follow-up', [QuoteSettingsController::class, 'followUp'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::put('settings/quote-follow-up', [QuoteSettingsController::class, 'updateFollowUp'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::get('settings/quote-email-templates', [QuoteSettingsController::class, 'emailTemplates'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::patch('settings/quote-email-templates/{quoteEmailTemplate}', [QuoteSettingsController::class, 'updateEmailTemplate'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('settings/quote-email-templates/{quoteEmailTemplate}/preview', [QuoteSettingsController::class, 'previewEmailTemplate'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::get('settings/quote-templates/audit-log', [QuoteSettingsController::class, 'auditLog'])
+        ->middleware('permission:manage_assisted_purchases');
+
+    // --- Quote Dashboard ---
+    Route::get('quotes/dashboard/metrics', [QuoteDashboardController::class, 'metrics'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::get('quotes/dashboard/list', [QuoteDashboardController::class, 'list'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('quotes/{assistedPurchase}/prolong', [QuoteDashboardController::class, 'prolong'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::post('quotes/{assistedPurchase}/cancel-reminders', [QuoteDashboardController::class, 'cancelReminders'])
+        ->middleware('permission:manage_assisted_purchases');
+
+    // --- Analytics Achat Assisté ---
+    Route::get('analytics/assisted-purchase', AssistedPurchaseAnalyticsController::class)
+        ->middleware('permission:manage_assisted_purchases');
 
     // --- Shipments ---
     Route::get('shipments', [ShipmentController::class, 'index']);
@@ -188,9 +262,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('search-clients', [ShipmentWizardController::class, 'searchClients']);
         Route::get('search-recipients', [ShipmentWizardController::class, 'searchRecipients']);
         Route::post('quick-create-client', [ShipmentWizardController::class, 'quickCreateClient']);
+        Route::post('quick-create-portal', [ShipmentWizardController::class, 'quickCreatePortal']);
         Route::post('quick-create-recipient', [ShipmentWizardController::class, 'quickCreateRecipient']);
         Route::get('agencies', [ShipmentWizardController::class, 'agencies']);
         Route::get('ship-lines-for-route', [ShipmentWizardController::class, 'shipLinesForRoute']);
+        Route::get('client-name/{id}', [ShipmentWizardController::class, 'clientName']);
     });
 
     // --- Locations ---
@@ -324,6 +400,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('shipments/{shipment}/pdf/delivery-note', [PdfController::class, 'deliveryNote']);
     Route::get('pickups/{pickup}/pdf/delivery-note', [PdfController::class, 'deliveryNotePickup']);
     Route::get('packages/{preAlert}/pdf/invoice', [PdfController::class, 'packageInvoice']);
+    Route::get('assisted-purchases/{assisted_purchase}/pdf/quote', [PdfController::class, 'assistedPurchaseQuote'])
+        ->middleware('permission:manage_assisted_purchases');
+    Route::get('assisted-purchases/{assisted_purchase}/preview/quote', [PdfController::class, 'previewAssistedPurchaseQuote'])
+        ->middleware('permission:manage_assisted_purchases');
 
     // --- FlexPay phase 2 ---
     Route::prefix('flexpay')->group(function () {
@@ -495,6 +575,18 @@ Route::middleware('throttle:30,1')->group(function () {
     Route::post('widget/assisted-purchase', [\App\Http\Controllers\WordPressFormController::class, 'createAssistedPurchase']);
     Route::post('widget/pre-alert', [\App\Http\Controllers\WordPressFormController::class, 'createPreAlert']);
 });
+
+// --- Quote Response (public, signed link) ---
+Route::get('quotes/verify-token', [QuoteResponseController::class, 'verifyToken']);
+Route::post('quotes/respond', [QuoteResponseController::class, 'respond']);
+
+// --- Assisted Purchase Public Form ---
+Route::middleware('throttle:10,1')->group(function () {
+    Route::post('assisted-purchases/public', [AssistedPurchasePublicController::class, 'store']);
+});
+
+// --- Inbound Email Webhook (achats@monrespro.cd) ---
+Route::post('webhooks/inbound-email', [InboundEmailController::class, 'handle']);
 
 Route::post('newsletter/subscribe', [NewsletterController::class, 'subscribe']);
 Route::post('newsletter/unsubscribe', [NewsletterController::class, 'unsubscribe']);

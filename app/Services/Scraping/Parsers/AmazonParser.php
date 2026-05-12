@@ -9,13 +9,19 @@ class AmazonParser implements MerchantParser
     public function parse(string $html, string $url): ProductData
     {
         $name = $this->extractMeta($html, 'og:title')
-            ?? $this->extractById($html, 'productTitle');
+            ?? $this->extractById($html, 'productTitle')
+            ?? $this->extractByClass($html, 'qa-title-text');
 
         $priceRaw = $this->extractMeta($html, 'product:price:amount')
-            ?? $this->extractByClass($html, 'a-price-whole');
+            ?? $this->extractByClass($html, 'a-price-whole')
+            ?? $this->extractByClass($html, 'priceToPay');
 
-        $currency = $this->extractMeta($html, 'product:price:currency') ?? $this->detectCurrency($url);
-        $image = $this->extractMeta($html, 'og:image');
+        $currency = $this->extractMeta($html, 'product:price:currency') 
+            ?? $this->extractByClass($html, 'a-price-symbol')
+            ?? $this->detectCurrency($url);
+        
+        $image = $this->extractMeta($html, 'og:image')
+            ?? $this->extractById($html, 'landingImage');
 
         $price = $priceRaw ? (float) str_replace([',', ' '], ['.', ''], $priceRaw) : null;
 

@@ -48,6 +48,7 @@ class AppSettingController extends Controller
         'prealert_reference_format', 'prealert_reference_prefix', 'prealert_reference_seq_pad', 'prealert_next_seq',
         'purchase_order_reference_format', 'purchase_order_reference_prefix', 'purchase_order_reference_seq_pad', 'purchase_order_next_seq',
         'customer_package_reference_format', 'customer_package_reference_prefix', 'customer_package_reference_seq_pad', 'customer_package_next_seq',
+        'quote_reference_format', 'quote_reference_prefix', 'quote_reference_seq_pad', 'quote_next_seq',
     ];
 
     private const DRAFT_KEYS = [
@@ -210,6 +211,10 @@ class AppSettingController extends Controller
             'customer_package_reference_prefix' => ['nullable', 'string', 'max:32'],
             'customer_package_reference_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
             'customer_package_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
+            'quote_reference_format' => ['nullable', 'string', 'max:120'],
+            'quote_reference_prefix' => ['nullable', 'string', 'max:32'],
+            'quote_reference_seq_pad' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'quote_next_seq' => ['nullable', 'integer', 'min:1', 'max:99999999'],
             'invoice_terms' => ['nullable', 'string', 'max:10000'],
             'signing_company' => ['nullable', 'string', 'max:255'],
             'signing_customer' => ['nullable', 'string', 'max:255'],
@@ -271,7 +276,7 @@ class AppSettingController extends Controller
             $showBrand = '1';
         }
 
-        $currency = trim((string) ($fromDb['currency'] ?? '')) !== '' ? trim((string) $fromDb['currency']) : 'EUR';
+        $currency = trim((string) ($fromDb['currency'] ?? ''));
         $symbolRaw = trim((string) ($fromDb['currency_symbol'] ?? ''));
         $symbolPosition = ($fromDb['symbol_position'] ?? '') === 'suffix' ? 'after' : 'before';
 

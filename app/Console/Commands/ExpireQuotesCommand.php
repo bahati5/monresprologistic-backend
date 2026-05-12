@@ -5,13 +5,13 @@ namespace App\Console\Commands;
 use App\Enums\AssistedPurchaseStatus;
 use App\Events\AssistedPurchaseStatusChanged;
 use App\Models\AssistedPurchase;
+use App\Models\QuoteSnapshot;
 use App\Models\Setting;
-use App\Services\NotificationDispatcher;
 use Illuminate\Console\Command;
 
 /**
- * §5.6 — Expire les devis non répondus après le délai configuré (défaut 72h).
- * Doit être planifié toutes les heures.
+ * Expire les devis non répondus après le délai configuré.
+ * Utilise quote_expires_at si disponible, sinon fallback sur quote_validity_days depuis quoted_at.
  */
 class ExpireQuotesCommand extends Command
 {
@@ -21,21 +21,42 @@ class ExpireQuotesCommand extends Command
 
     public function handle(): int
     {
-        $hours = (int) Setting::getValue('quote_expiry_hours', 72);
-        $cutoff = now()->subHours($hours);
+        $validityDays = (int) Setting::getValue('quote_validity_days', '7');
+        $fallbackCutoff = now()->subDays($validityDays);
 
         $expired = AssistedPurchase::query()
-            ->whereIn('status', [
-                AssistedPurchaseStatus::QUOTED->value,
-                AssistedPurchaseStatus::AWAITING_PAYMENT->value,
-            ])
-            ->where('quoted_at', '<=', $cutoff)
+            ->where('status', AssistedPurchaseStatus::QUOTED->value)
+            ->where(function ($query) use ($fallbackCutoff) {
+                $query->where(function ($q) {
+                    $q->whereNotNull('quote_expires_at')
+                        ->where('quote_expires_at', '<=', now());
+                })->orWhere(function ($q) use ($fallbackCutoff) {
+                    $q->whereNull('quote_expires_at')
+                        ->where('quoted_at', '<=', $fallbackCutoff);
+                });
+            })
             ->get();
 
         foreach ($expired as $purchase) {
             $old = $purchase->status;
             $purchase->update(['status' => AssistedPurchaseStatus::EXPIRED]);
-            AssistedPurchaseStatusChanged::dispatch($purchase->fresh(), $old, AssistedPurchaseStatus::EXPIRED, null);
+
+            $latestSnapshot = QuoteSnapshot::where('assisted_purchase_id', $purchase->id)
+                ->where('client_response', 'pending')
+                ->orderByDesc('version')
+                ->first();
+
+            if ($latestSnapshot) {
+                $latestSnapshot->update(['client_response' => 'expired']);
+            }
+
+            AssistedPurchaseStatusChanged::dispatch(
+                $purchase->fresh(['user']),
+                $old,
+                AssistedPurchaseStatus::EXPIRED,
+                null
+            );
+
             $this->info("Expired purchase #{$purchase->id}");
         }
 
