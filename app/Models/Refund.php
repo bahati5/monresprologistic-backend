@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\RefundStatus;
+use App\Models\Concerns\HasUuid;
 use App\Support\ConfigurableReferenceCode;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -11,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class Refund extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'reference_code',
         'refundable_type',

@@ -93,14 +93,9 @@ class RolePermissionController extends Controller
     {
         abort_unless($request->user()->hasRole('super_admin'), 403);
 
-        $data = $request->validate([
-            'name' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/', 'unique:permissions,name'],
-        ]);
-
-        $perm = Permission::create(['name' => $data['name'], 'guard_name' => 'web']);
-        app()[PermissionRegistrar::class]->forgetCachedPermissions();
-
-        return response()->json(['message' => 'Permission créée.', 'permission' => ['id' => $perm->id, 'name' => $perm->name]], 201);
+        return response()->json([
+            'message' => 'La création de permissions est désactivée. Le catalogue est défini par le système.',
+        ], 403);
     }
 
     public function userPermissions(Request $request, User $user): JsonResponse

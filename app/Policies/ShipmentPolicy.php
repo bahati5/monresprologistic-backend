@@ -7,9 +7,25 @@ use App\Models\User;
 
 class ShipmentPolicy
 {
+    /** @deprecated noms historiques Spatie (view_shipments) + format module (shipments.view) */
+    private function canViewShipments(User $user): bool
+    {
+        return $user->can('shipments.view') || $user->can('view_shipments');
+    }
+
+    private function canCreateShipments(User $user): bool
+    {
+        return $user->can('shipments.create') || $user->can('create_shipments');
+    }
+
+    private function canEditShipments(User $user): bool
+    {
+        return $user->can('shipments.edit') || $user->can('edit_shipments');
+    }
+
     public function viewAny(User $user): bool
     {
-        return $user->can('view_shipments');
+        return $this->canViewShipments($user);
     }
 
     public function view(User $user, Shipment $shipment): bool
@@ -21,7 +37,12 @@ class ShipmentPolicy
                 || ($profileId && (int) $shipment->sender_profile_id === (int) $profileId);
         }
 
-        if (! $user->can('view_shipments')) {
+        if ($user->hasRole('driver')) {
+            return (int) ($shipment->assigned_driver_id ?? 0) === (int) $user->id
+                && (int) ($shipment->agency_id ?? 0) === (int) ($user->agency_id ?? 0);
+        }
+
+        if (! $this->canViewShipments($user)) {
             return false;
         }
 
@@ -34,7 +55,11 @@ class ShipmentPolicy
 
     public function create(User $user): bool
     {
-        return $user->can('create_shipments');
+        if ($user->hasRole('client')) {
+            return false;
+        }
+
+        return $this->canCreateShipments($user);
     }
 
     public function update(User $user, Shipment $shipment): bool
@@ -47,11 +72,11 @@ class ShipmentPolicy
 
         if ($user->hasRole('driver')
             && (int) ($shipment->assigned_driver_id ?? 0) === (int) $user->id
-            && $user->can('view_shipments')) {
+            && $this->canViewShipments($user)) {
             return (int) ($shipment->agency_id ?? 0) === (int) ($user->agency_id ?? 0);
         }
 
-        if (! $user->can('edit_shipments')) {
+        if (! $this->canEditShipments($user)) {
             return false;
         }
 

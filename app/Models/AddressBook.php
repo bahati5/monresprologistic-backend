@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class AddressBook extends Model
 {
+    use HasUuid;
+
     protected $table = 'address_books';
 
     protected $fillable = [

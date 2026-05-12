@@ -56,6 +56,14 @@ class LoginRequest extends FormRequest
             ]);
         }
 
+        if (! $profile->is_active) {
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'login' => 'Ce compte est désactivé.',
+            ]);
+        }
+
         RateLimiter::clear($this->throttleKey());
 
         Auth::login($user, $this->boolean('remember'));
@@ -84,6 +92,6 @@ class LoginRequest extends FormRequest
 
     public function throttleKey(): string
     {
-        return Str::transliterate(Str::lower($this->string('login')) . '|' . $this->ip());
+        return Str::transliterate(Str::lower($this->string('login')).'|'.$this->ip());
     }
 }

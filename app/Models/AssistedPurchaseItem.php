@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use App\Support\AssistedPurchaseUrlLabel;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class AssistedPurchaseItem extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'assisted_purchase_id',
         'merchant_id',

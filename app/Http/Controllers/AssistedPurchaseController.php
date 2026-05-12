@@ -2,17 +2,20 @@
 
 namespace App\Http\Controllers;
 
-use App\Events\AssistedPurchaseStatusChanged;
 use App\Enums\AssistedPurchaseStatus;
+use App\Enums\PickupStatus;
 use App\Enums\ShipmentStatus;
+use App\Events\AssistedPurchaseStatusChanged;
+use App\Jobs\ScrapeProductJob;
 use App\Mail\AssistedPurchaseQuoteMail;
 use App\Models\Agency;
 use App\Models\AssistedPurchase;
 use App\Models\AssistedPurchaseItem;
 use App\Models\AssistedPurchasePayment;
-use App\Models\QuoteSnapshot;
 use App\Models\Notification;
+use App\Models\Pickup;
 use App\Models\Profile;
+use App\Models\QuoteSnapshot;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
@@ -22,13 +25,18 @@ use App\Notifications\QuoteReadyNotification;
 use App\Services\NotificationDispatcher;
 use App\Services\QuoteCalculationService;
 use App\Services\QuoteFollowUpService;
+use App\Services\Scraping\ProductScraperService;
+use App\Services\Twilio\TwilioGateway;
 use App\Support\AssistedPurchaseUrlLabel;
 use App\Support\FrontendPortalUrl;
 use App\Support\QuoteSnapshotDataNormalizer;
 use App\Support\ShipmentDocumentSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -248,7 +256,7 @@ class AssistedPurchaseController extends Controller
             ? $firstNameRaw
             : AssistedPurchaseUrlLabel::fromUrl($first['url']);
 
-        $purchase = DB::transaction(function () use ($request, $data, $first, $firstName, $clientId) {
+        $purchase = DB::transaction(function () use ($data, $first, $firstName, $clientId) {
             $parent = AssistedPurchase::query()->create([
                 'user_id' => $clientId,
                 'status' => AssistedPurchaseStatus::PENDING_QUOTE,
@@ -293,7 +301,7 @@ class AssistedPurchaseController extends Controller
      */
     private function autoExtractItems(AssistedPurchase $purchase): void
     {
-        $scraper = app(\App\Services\Scraping\ProductScraperService::class);
+        $scraper = app(ProductScraperService::class);
 
         foreach ($purchase->items as $item) {
             $url = trim((string) ($item->url ?? ''));
@@ -310,7 +318,7 @@ class AssistedPurchaseController extends Controller
                     $item->update(['name' => $result->name]);
                 }
             } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning('Auto-extract failed', [
+                Log::warning('Auto-extract failed', [
                     'item_id' => $item->id,
                     'url' => $url,
                     'error' => $e->getMessage(),
@@ -365,7 +373,7 @@ class AssistedPurchaseController extends Controller
         $rawNote = $data['payment_methods_note'] ?? null;
         $paymentMethodsNote = is_string($rawNote) && trim($rawNote) !== '' ? trim($rawNote) : null;
 
-        $hasDynamicLines = !empty($dynamicLines['lines']);
+        $hasDynamicLines = ! empty($dynamicLines['lines']);
 
         if ($hasDynamicLines) {
             $calcService = app(QuoteCalculationService::class);
@@ -457,7 +465,7 @@ class AssistedPurchaseController extends Controller
         $num = number_format($amount, $decimals, ',', ' ');
         $suffix = ((string) (Setting::getValue('symbol_position', 'prefix') ?: 'prefix')) === 'suffix';
 
-        return $suffix ? $num . "\u{a0}" . $symbol : $symbol . $num;
+        return $suffix ? $num."\u{a0}".$symbol : $symbol.$num;
     }
 
     public function quote(Request $request, AssistedPurchase $assisted_purchase): JsonResponse
@@ -1112,7 +1120,7 @@ class AssistedPurchaseController extends Controller
 
     protected function sendQuoteSmsToClient(AssistedPurchase $purchase, User $client): void
     {
-        if (! \App\Services\Twilio\TwilioGateway::smsEnabled()) {
+        if (! TwilioGateway::smsEnabled()) {
             return;
         }
 
@@ -1123,23 +1131,23 @@ class AssistedPurchaseController extends Controller
 
         $total = number_format((float) ($purchase->total_amount ?? 0), 2, '.', ' ');
         $currency = $purchase->quote_currency ?? 'USD';
-        $ref = 'MRP-AA-' . str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
+        $ref = 'MRP-AA-'.str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
         $expiresAt = $purchase->quote_expires_at
             ? $purchase->quote_expires_at->format('d/m')
             : '';
 
         $baseUrl = config('app.frontend_url', 'https://monrespro.cd');
-        $shortLink = $baseUrl . '/d/' . str_replace('MRP-AA-', 'AA', $ref);
+        $shortLink = $baseUrl.'/d/'.str_replace('MRP-AA-', 'AA', $ref);
 
         $message = "Monrespro: Votre devis {$ref} est pret. "
-            . "Total: {$total} {$currency}."
-            . ($expiresAt ? " Valable jusqu'au {$expiresAt}." : '')
-            . " Consultez: {$shortLink}";
+            ."Total: {$total} {$currency}."
+            .($expiresAt ? " Valable jusqu'au {$expiresAt}." : '')
+            ." Consultez: {$shortLink}";
 
         try {
-            \App\Services\Twilio\TwilioGateway::sendSms($phone, $message);
+            TwilioGateway::sendSms($phone, $message);
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning("SMS devis failed for AP#{$purchase->id}: {$e->getMessage()}");
+            Log::warning("SMS devis failed for AP#{$purchase->id}: {$e->getMessage()}");
         }
     }
 
@@ -1158,8 +1166,13 @@ class AssistedPurchaseController extends Controller
             'delivery_address' => ['nullable', 'string', 'max:500'],
             'delivery_time_slot' => ['nullable', 'string', 'in:morning,afternoon'],
             'delivery_instructions' => ['nullable', 'string', 'max:500'],
-            /** Agence expéditrice (hub Monrespro) — utile si client / opérateur n’ont pas d’`agency_id` (ex. super admin). */
             'agency_id' => ['nullable', 'integer', Rule::exists('agencies', 'id')],
+            'recipient_country_id' => ['nullable', 'integer', Rule::exists('countries', 'id')],
+            'recipient_city_id' => ['nullable', 'integer', Rule::exists('cities', 'id')],
+            'recipient_address' => ['nullable', 'string', 'max:500'],
+            'recipient_phone' => ['nullable', 'string', 'max:30'],
+            'notify_client' => ['nullable', 'boolean'],
+            'check_only' => ['nullable', 'boolean'],
         ]);
 
         if ($assisted_purchase->status !== AssistedPurchaseStatus::ARRIVED_AT_HUB) {
@@ -1170,7 +1183,7 @@ class AssistedPurchaseController extends Controller
 
         if ($assisted_purchase->converted_shipment_id !== null) {
             throw ValidationException::withMessages([
-                'converted' => ['Cet achat a déjà été converti en expédition (Shipment #' . $assisted_purchase->converted_shipment_id . ').'],
+                'converted' => ['Cet achat a déjà été converti en expédition (Shipment #'.$assisted_purchase->converted_shipment_id.').'],
             ]);
         }
 
@@ -1185,23 +1198,85 @@ class AssistedPurchaseController extends Controller
 
         $agency = $this->resolveAgencyForAssistedPurchaseConversion($request, $client);
 
-        // Check if client has a complete profile (required for recipient)
-        $clientProfileCheck = $this->validateClientProfileComplete($client);
-        if (! $clientProfileCheck['valid']) {
-            // Send notification to client to complete profile
-            $this->notifyClientToCompleteProfile($client, $assisted_purchase);
+        $client->loadMissing('profile');
+        $clientProfile = $client->profile;
 
-            throw ValidationException::withMessages([
-                'recipient_profile' => [
-                    'Le profil du client est incomplet. ' . $clientProfileCheck['message'] . ' ' .
-                    'Un e-mail a été envoyé au client pour compléter ses informations.',
+        if (! $clientProfile) {
+            $clientProfile = Profile::create([
+                'first_name' => $client->name ?? 'Client',
+                'last_name' => '',
+                'email' => $client->email,
+                'is_client' => true,
+                'is_active' => true,
+            ]);
+            $client->update(['profile_id' => $clientProfile->id]);
+        }
+
+        $hasOverrides = $request->filled('recipient_country_id')
+            || $request->filled('recipient_city_id')
+            || $request->filled('recipient_address')
+            || $request->filled('recipient_phone');
+
+        if ($hasOverrides) {
+            $updates = [];
+            if ($request->filled('recipient_country_id')) {
+                $updates['country_id'] = $request->input('recipient_country_id');
+            }
+            if ($request->filled('recipient_city_id')) {
+                $updates['city_id'] = $request->input('recipient_city_id');
+            }
+            if ($request->filled('recipient_address')) {
+                $updates['address'] = $request->input('recipient_address');
+            }
+            if ($request->filled('recipient_phone')) {
+                $updates['phone'] = $request->input('recipient_phone');
+            }
+            $clientProfile->update($updates);
+            $clientProfile->refresh();
+        }
+
+        $freshClient = $client->fresh(['profile']);
+        $clientProfileCheck = $this->validateClientProfileComplete($freshClient);
+
+        if ($request->boolean('check_only')) {
+            if ($clientProfileCheck['valid']) {
+                return response()->json(['profile_complete' => true]);
+            }
+
+            return response()->json([
+                'profile_complete' => false,
+                'missing_fields' => $clientProfileCheck['missing_fields'] ?? [],
+                'message' => $clientProfileCheck['message'],
+                'client_profile' => [
+                    'phone' => $clientProfile->phone ?? $client->phone ?? '',
+                    'country_id' => $clientProfile->country_id,
+                    'city_id' => $clientProfile->city_id,
+                    'address' => $clientProfile->address ?? '',
                 ],
             ]);
         }
 
-        $clientProfile = $client->profile;
+        if (! $clientProfileCheck['valid']) {
+            if ($request->boolean('notify_client')) {
+                $this->notifyClientToCompleteProfile($client, $assisted_purchase);
+            }
 
-        $shipment = DB::transaction(function () use ($request, $assisted_purchase, $client, $agency, $clientProfile) {
+            return response()->json([
+                'profile_complete' => false,
+                'missing_fields' => $clientProfileCheck['missing_fields'] ?? [],
+                'message' => $clientProfileCheck['message'],
+                'client_profile' => [
+                    'phone' => $clientProfile->phone ?? $client->phone ?? '',
+                    'country_id' => $clientProfile->country_id,
+                    'city_id' => $clientProfile->city_id,
+                    'address' => $clientProfile->address ?? '',
+                ],
+                'notification_sent' => $request->boolean('notify_client'),
+            ], 200);
+        }
+
+        $clientProfile = $freshClient->profile;
+        $shipment = DB::transaction(function () use ($request, $assisted_purchase, $agency, $clientProfile) {
             // Agency is the sender (Monrespro ships the goods)
             $agencyProfile = $this->ensureAgencyProfile($agency);
 
@@ -1232,14 +1307,14 @@ class AssistedPurchaseController extends Controller
                 'user_id' => $request->user()->id,
                 'status' => ShipmentStatus::ReceivedAtHub,
                 'title' => 'Expédition créée depuis achat assisté',
-                'description' => 'Conversion automatique de l\'achat assisté #' . $assisted_purchase->id . '. Expéditeur: ' . $agency->name . ', Destinataire: ' . $clientProfile->full_name,
+                'description' => 'Conversion automatique de l\'achat assisté #'.$assisted_purchase->id.'. Expéditeur: '.$agency->name.', Destinataire: '.$clientProfile->full_name,
                 'ip_address' => $request->ip(),
             ]);
 
             foreach ($assisted_purchase->items as $item) {
                 $description = $item->display_label ?? $item->name ?? 'Article';
                 if ($item->options) {
-                    $description .= ' — ' . $item->options;
+                    $description .= ' — '.$item->options;
                 }
 
                 ShipmentItem::query()->create([
@@ -1270,9 +1345,9 @@ class AssistedPurchaseController extends Controller
                 $client->id,
                 'shipment',
                 'Expédition créée depuis votre achat assisté',
-                'Votre achat assisté #' . $assisted_purchase->id . ' a été converti en dossier d\'expédition #' . $shipment->id . '. Le fret sera calculé après pesée.',
+                'Votre achat assisté #'.$assisted_purchase->id.' a été converti en dossier d\'expédition #'.$shipment->id.'. Le fret sera calculé après pesée.',
                 ['shipment_id' => $shipment->id, 'assisted_purchase_id' => $assisted_purchase->id],
-                $base . '/shipments/' . $shipment->id,
+                $base.'/shipments/'.$shipment->id,
                 ['in_app']
             );
         }
@@ -1280,11 +1355,11 @@ class AssistedPurchaseController extends Controller
         // §8.3 PRD — Création auto pickup si livraison à domicile demandée
         $pickupId = null;
         if ($request->boolean('create_home_delivery') && $client) {
-            $pickup = \App\Models\Pickup::create([
+            $pickup = Pickup::create([
                 'shipment_id' => $shipment->id,
                 'agency_id' => $shipment->agency_id,
                 'type' => 'delivery',
-                'status' => \App\Enums\PickupStatus::Draft,
+                'status' => PickupStatus::Draft,
                 'contact_name' => $client->name ?? $client->profile?->full_name ?? '',
                 'contact_phone' => $client->phone ?? $client->profile?->phone ?? '',
                 'address' => $request->input('delivery_address', $client->profile?->address ?? ''),
@@ -1295,8 +1370,8 @@ class AssistedPurchaseController extends Controller
         }
 
         return response()->json([
-            'message' => 'Expédition #' . $shipment->id . ' créée avec succès.'
-                . ($pickupId ? ' Livraison à domicile programmée (#' . $pickupId . ').' : ''),
+            'message' => 'Expédition #'.$shipment->id.' créée avec succès.'
+                .($pickupId ? ' Livraison à domicile programmée (#'.$pickupId.').' : ''),
             'shipment_id' => $shipment->id,
             'pickup_id' => $pickupId,
         ]);
@@ -1304,7 +1379,7 @@ class AssistedPurchaseController extends Controller
 
     /**
      * Validate that client profile is complete for shipment.
-     * Returns ['valid' => bool, 'message' => string]
+     * Returns ['valid' => bool, 'message' => string, 'missing_fields' => string[]]
      */
     protected function validateClientProfileComplete(User $client): array
     {
@@ -1314,31 +1389,37 @@ class AssistedPurchaseController extends Controller
             return [
                 'valid' => false,
                 'message' => 'Le client n\'a pas de profil.',
+                'missing_fields' => ['phone', 'country_id', 'address'],
             ];
         }
 
         $missing = [];
+        $missingFields = [];
 
         if (empty($profile->phone) && empty($client->phone)) {
             $missing[] = 'numéro de téléphone';
+            $missingFields[] = 'phone';
         }
 
         if (empty($profile->country_id)) {
             $missing[] = 'pays de destination';
+            $missingFields[] = 'country_id';
         }
 
         if (empty($profile->city_id) && empty($profile->address)) {
             $missing[] = 'ville ou adresse complète';
+            $missingFields[] = 'address';
         }
 
         if (count($missing) > 0) {
             return [
                 'valid' => false,
-                'message' => 'Informations manquantes : ' . implode(', ', $missing) . '.',
+                'message' => 'Informations manquantes : '.implode(', ', $missing).'.',
+                'missing_fields' => $missingFields,
             ];
         }
 
-        return ['valid' => true, 'message' => ''];
+        return ['valid' => true, 'message' => '', 'missing_fields' => []];
     }
 
     /**
@@ -1347,13 +1428,13 @@ class AssistedPurchaseController extends Controller
     protected function notifyClientToCompleteProfile(User $client, AssistedPurchase $purchase): void
     {
         $base = FrontendPortalUrl::base();
-        $profileUrl = $base . '/profile';
+        $profileUrl = $base.'/profile';
 
         NotificationController::notify(
             $client->id,
             'assisted_purchase',
             'Complétez votre profil pour la livraison',
-            'Votre achat assisté #' . $purchase->id . ' est prêt à être expédié. Veuillez compléter votre adresse de livraison (pays, ville, téléphone) dans votre profil.',
+            'Votre achat assisté #'.$purchase->id.' est prêt à être expédié. Veuillez compléter votre adresse de livraison (pays, ville, téléphone) dans votre profil.',
             ['assisted_purchase_id' => $purchase->id],
             $profileUrl,
             ['in_app', 'email']
@@ -1531,7 +1612,7 @@ class AssistedPurchaseController extends Controller
         $profile = Profile::query()->create([
             'first_name' => $agency->name,
             'last_name' => '',
-            'email' => $agency->contact_email ?? 'contact@' . Str::slug($agency->code) . '.local',
+            'email' => $agency->contact_email ?? 'contact@'.Str::slug($agency->code).'.local',
             'phone' => $agency->contact_phone,
             'phone_secondary' => $agency->contact_phone_secondary,
             'address' => $agency->address,
@@ -1557,6 +1638,7 @@ class AssistedPurchaseController extends Controller
             return 'Client';
         }
         $parts = explode(' ', trim($fullName), 2);
+
         return $parts[0] ?? 'Client';
     }
 
@@ -1569,6 +1651,7 @@ class AssistedPurchaseController extends Controller
             return null;
         }
         $parts = explode(' ', trim($fullName), 2);
+
         return $parts[1] ?? null;
     }
 
@@ -1739,18 +1822,18 @@ class AssistedPurchaseController extends Controller
         }
     }
 
-    public function extractProduct(\Illuminate\Http\Request $request): \Illuminate\Http\JsonResponse
+    public function extractProduct(Request $request): JsonResponse
     {
         $data = $request->validate([
             'url' => ['required', 'url', 'max:2000'],
         ]);
 
-        $cacheKey = 'product_extract_' . md5($data['url'] . '_' . $request->user()->id . '_' . now()->timestamp);
+        $cacheKey = 'product_extract_'.md5($data['url'].'_'.$request->user()->id.'_'.now()->timestamp);
 
         // Exécution synchrone : l’extraction ne doit pas dépendre d’un worker (`queue:work`).
         // Sinon, avec QUEUE_CONNECTION=database/redis sans worker, le cache reste vide
         // et l’UI affiche « Extraction indisponible » après le polling.
-        \App\Jobs\ScrapeProductJob::dispatchSync($data['url'], $cacheKey);
+        ScrapeProductJob::dispatchSync($data['url'], $cacheKey);
 
         return response()->json([
             'cache_key' => $cacheKey,
@@ -1758,9 +1841,9 @@ class AssistedPurchaseController extends Controller
         ]);
     }
 
-    public function extractProductResult(string $cacheKey): \Illuminate\Http\JsonResponse
+    public function extractProductResult(string $cacheKey): JsonResponse
     {
-        $result = \Illuminate\Support\Facades\Cache::get($cacheKey);
+        $result = Cache::get($cacheKey);
 
         if ($result === null) {
             return response()->json(['status' => 'pending']);
@@ -1892,9 +1975,9 @@ class AssistedPurchaseController extends Controller
         $client = $assisted_purchase->user;
         if ($client) {
             $base = FrontendPortalUrl::base();
-            $purchaseUrl = $base . '/purchase-orders/' . $assisted_purchase->id;
+            $purchaseUrl = $base.'/purchase-orders/'.$assisted_purchase->id;
             $amount = number_format((float) $calculationResult['total_primary'], 2, ',', ' ')
-                . ' ' . $calculationResult['primary_currency'];
+                .' '.$calculationResult['primary_currency'];
             NotificationController::notify(
                 $client->id,
                 'assisted_purchase',
@@ -2027,15 +2110,15 @@ class AssistedPurchaseController extends Controller
             ];
 
             $base = FrontendPortalUrl::base();
-            $purchaseUrl = $base . '/purchase-orders/' . $assisted_purchase->id;
+            $purchaseUrl = $base.'/purchase-orders/'.$assisted_purchase->id;
 
             NotificationController::notify(
                 $client->id,
                 'assisted_purchase',
                 "Article indisponible : {$itemLabel}",
                 "L'article \"{$itemLabel}\" de votre commande n'est plus disponible. "
-                    . "Résolution : " . ($resolutionLabels[$resolution] ?? $resolution) . ". "
-                    . "Consultez votre espace pour plus de détails.",
+                    .'Résolution : '.($resolutionLabels[$resolution] ?? $resolution).'. '
+                    .'Consultez votre espace pour plus de détails.',
                 [
                     'assisted_purchase_id' => $assisted_purchase->id,
                     'item_id' => $item->id,
@@ -2117,15 +2200,15 @@ class AssistedPurchaseController extends Controller
         $client = $assisted_purchase->user;
         if ($client) {
             $base = FrontendPortalUrl::base();
-            $purchaseUrl = $base . '/purchase-orders/' . $assisted_purchase->id;
+            $purchaseUrl = $base.'/purchase-orders/'.$assisted_purchase->id;
 
             NotificationController::notify(
                 $client->id,
                 'assisted_purchase',
                 'Devis révisé — changement de prix fournisseur',
                 "Le prix d'un ou plusieurs articles a changé chez le fournisseur. "
-                    . "Un nouveau devis (v{$newVersion}) vous a été envoyé. "
-                    . "Votre acceptation est requise.",
+                    ."Un nouveau devis (v{$newVersion}) vous a été envoyé. "
+                    .'Votre acceptation est requise.',
                 [
                     'assisted_purchase_id' => $assisted_purchase->id,
                     'version' => $newVersion,
@@ -2150,33 +2233,33 @@ class AssistedPurchaseController extends Controller
     ): void {
         $itemLabel = $item->name ?? $item->display_label ?? "Article #{$item->id}";
         $resolution = $data['resolution'];
-        $ref = 'MRP-AA-' . str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
+        $ref = 'MRP-AA-'.str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
 
         $resolutionMessages = [
             'wait_restock' => 'Nous attendons le réapprovisionnement.'
-                . (isset($data['restock_date']) ? " Date estimée : {$data['restock_date']}." : ''),
+                .(isset($data['restock_date']) ? " Date estimée : {$data['restock_date']}." : ''),
             'propose_alternative' => 'Nous vous proposons une alternative : '
-                . ($data['alternative_description'] ?? 'voir détails dans votre espace.'),
+                .($data['alternative_description'] ?? 'voir détails dans votre espace.'),
             'partial_refund' => 'L\'article sera retiré de votre commande et le montant correspondant vous sera remboursé.',
             'full_refund' => 'Votre commande est annulée et un remboursement intégral sera effectué.',
         ];
 
         $body = "Bonjour {$client->name},\n\n"
-            . "Concernant votre commande {$ref}, l'article \"{$itemLabel}\" n'est malheureusement plus disponible.\n\n"
-            . ($resolutionMessages[$resolution] ?? '')
-            . "\n\n"
-            . ($data['staff_note'] ?? '')
-            . "\n\nConnectez-vous sur votre espace Monrespro pour plus de détails.\n\n"
-            . "L'équipe Monrespro";
+            ."Concernant votre commande {$ref}, l'article \"{$itemLabel}\" n'est malheureusement plus disponible.\n\n"
+            .($resolutionMessages[$resolution] ?? '')
+            ."\n\n"
+            .($data['staff_note'] ?? '')
+            ."\n\nConnectez-vous sur votre espace Monrespro pour plus de détails.\n\n"
+            ."L'équipe Monrespro";
 
         $subject = "Monrespro — Article indisponible — {$ref}";
 
         try {
-            \Illuminate\Support\Facades\Mail::raw($body, function ($m) use ($client, $subject) {
+            Mail::raw($body, function ($m) use ($client, $subject) {
                 $m->to($client->email)->subject($subject);
             });
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning("Email item unavailable failed for AP#{$purchase->id}: {$e->getMessage()}");
+            Log::warning("Email item unavailable failed for AP#{$purchase->id}: {$e->getMessage()}");
         }
     }
 }

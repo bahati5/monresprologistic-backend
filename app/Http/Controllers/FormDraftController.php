@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\FormDraftType;
 use App\Models\FormDraft;
 use App\Models\Setting;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rules\Enum;
@@ -77,7 +78,11 @@ class FormDraftController extends Controller
 
         $user = $request->user();
         $formType = FormDraftType::from($data['form_type']);
-        $maxPerType = (int) Setting::getValue('draft_max_per_type', '5');
+        $rawMax = Setting::getValue('draft_max_per_type', '5');
+        $maxPerType = (int) ($rawMax !== null && $rawMax !== '' ? $rawMax : '5');
+        if ($maxPerType < 1 || $maxPerType > 50) {
+            $maxPerType = 5;
+        }
 
         $existingCount = FormDraft::query()
             ->forUser($user->id)
@@ -151,7 +156,7 @@ class FormDraftController extends Controller
         return response()->json(['message' => 'Brouillon supprimé.']);
     }
 
-    private function computeExpiresAt(mixed $user): \Carbon\Carbon
+    private function computeExpiresAt(mixed $user): Carbon
     {
         if ($user->hasRole('client')) {
             $days = (int) Setting::getValue('draft_client_expiry_days', '30');

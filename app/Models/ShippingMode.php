@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 
 class ShippingMode extends Model
 {
+    use HasUuid;
+
     protected $fillable = ['name', 'description', 'is_active', 'sort_order', 'volumetric_divisor', 'default_pricing_type', 'delivery_options'];
 
     protected function casts(): array

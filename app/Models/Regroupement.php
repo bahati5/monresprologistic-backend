@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ShipmentStatus;
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,6 +11,8 @@ use Illuminate\Support\Facades\DB;
 
 class Regroupement extends Model
 {
+    use HasUuid;
+
     protected $table = 'regroupements';
 
     protected $fillable = [

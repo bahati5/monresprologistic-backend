@@ -60,7 +60,13 @@ class AuthenticationTest extends TestCase
         ]);
 
         $response->assertOk()
-            ->assertJsonStructure(['user' => ['id', 'name', 'email']]);
+            ->assertJsonStructure([
+                'user' => [
+                    'uuid',
+                    'name',
+                    'email',
+                ],
+            ]);
     }
 
     /** AUTH-002 : Connexion valide client */

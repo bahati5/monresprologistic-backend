@@ -3,11 +3,14 @@
 namespace App\Models;
 
 use App\Enums\PickupStatus;
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Pickup extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'user_id', 'agency_id', 'shipment_id', 'status', 'assigned_driver_id',
         'latitude', 'longitude', 'address_text', 'requested_window', 'completed_at',

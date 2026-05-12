@@ -189,7 +189,11 @@ class ShipmentController extends Controller
     public function assignableDrivers(Request $request): JsonResponse
     {
         $user = $request->user();
-        abort_unless($user->can('edit_shipments') || $user->can('assign_drivers'), 403);
+        abort_unless(
+            $user->can('shipments.edit') || $user->can('edit_shipments')
+            || $user->can('operations.assign_drivers') || $user->can('assign_drivers'),
+            403
+        );
 
         return response()->json([
             'drivers' => $this->getDriversForUser($user)->values()->all(),

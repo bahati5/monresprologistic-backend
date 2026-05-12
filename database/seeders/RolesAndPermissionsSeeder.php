@@ -2,9 +2,9 @@
 
 namespace Database\Seeders;
 
+use App\Models\Role;
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
 class RolesAndPermissionsSeeder extends Seeder
@@ -14,24 +14,25 @@ class RolesAndPermissionsSeeder extends Seeder
         app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
         $permissions = [
-            'view_shipments', 'create_shipments', 'edit_shipments', 'delete_shipments',
-            'view_lockers', 'manage_lockers',
-            'view_payments', 'approve_payments', 'manage_finances',
-            'manage_pickups', 'assign_drivers',
-            'view_regroupements', 'create_regroupements', 'manage_regroupements',
-            'manage_settings', 'manage_agencies', 'manage_users', 'manage_roles',
-            'view_reports', 'export_data',
-            'manage_statuses', 'manage_pricing', 'manage_notifications',
-            'manage_pre_alerts', 'manage_assisted_purchases',
-            'manage_clients', 'manage_drivers',
-            'manage_newsletter', 'manage_backups',
-            'view_crm', 'view_inbound',
-            'manage_customer_packages', 'view_customer_packages',
-            'view_tracking',
-            'manage_documents',
-            'manage_refunds', 'approve_refunds',
-            'manage_exchange_rates',
-            'view_analytics',
+            'shipments.view', 'shipments.create', 'shipments.edit', 'shipments.delete',
+            'lockers.view', 'lockers.manage',
+            'finance.view_payments', 'finance.approve_payments', 'finance.manage',
+            'finance.manage_refunds', 'finance.approve_refunds', 'finance.manage_exchange_rates',
+            'operations.manage_pickups', 'operations.assign_drivers',
+            'operations.view_regroupements', 'operations.create_regroupements', 'operations.manage_regroupements',
+            'assisted_purchase.manage', 'assisted_purchase.view_quotes',
+            'assisted_purchase.create_quotes', 'assisted_purchase.approve_quotes',
+            'crm.view', 'crm.manage_clients', 'crm.manage_drivers',
+            'pre_alerts.manage', 'pre_alerts.view_inbound',
+            'customer_packages.view', 'customer_packages.manage',
+            'tracking.view',
+            'reports.view', 'reports.export',
+            'analytics.view',
+            'admin.manage_settings', 'admin.manage_agencies', 'admin.manage_statuses',
+            'admin.manage_pricing', 'admin.manage_notifications', 'admin.manage_newsletter',
+            'admin.manage_backups', 'admin.manage_documents',
+            'rbac.view_roles', 'rbac.manage_roles', 'rbac.manage_users',
+            'rbac.view_menus', 'rbac.manage_menus',
         ];
 
         foreach ($permissions as $name) {
@@ -41,47 +42,47 @@ class RolesAndPermissionsSeeder extends Seeder
         $roleMatrix = [
             'super_admin' => Permission::all()->pluck('name')->all(),
             'agency_admin' => [
-                'view_shipments', 'create_shipments', 'edit_shipments', 'delete_shipments',
-                'view_lockers', 'manage_lockers',
-                'view_payments', 'approve_payments', 'manage_finances',
-                'manage_pickups', 'assign_drivers',
-                'view_regroupements', 'create_regroupements', 'manage_regroupements',
-                'manage_users', 'manage_roles', 'view_reports', 'export_data',
-                'manage_pre_alerts', 'manage_assisted_purchases',
-                'manage_statuses', 'manage_pricing', 'manage_notifications',
-                'manage_agencies',
-                'manage_clients', 'manage_drivers',
-                'manage_newsletter',
-                'view_crm', 'view_inbound',
-                'manage_customer_packages', 'view_customer_packages',
-                'view_tracking',
-                'manage_documents',
-                'manage_refunds', 'approve_refunds',
-                'manage_exchange_rates',
-                'view_analytics',
+                'shipments.view', 'shipments.create', 'shipments.edit', 'shipments.delete',
+                'lockers.view', 'lockers.manage',
+                'finance.view_payments', 'finance.approve_payments', 'finance.manage',
+                'finance.manage_refunds', 'finance.approve_refunds', 'finance.manage_exchange_rates',
+                'operations.manage_pickups', 'operations.assign_drivers',
+                'operations.view_regroupements', 'operations.create_regroupements', 'operations.manage_regroupements',
+                'assisted_purchase.manage', 'assisted_purchase.view_quotes',
+                'crm.view', 'crm.manage_clients', 'crm.manage_drivers',
+                'pre_alerts.manage', 'pre_alerts.view_inbound',
+                'customer_packages.view', 'customer_packages.manage',
+                'tracking.view',
+                'reports.view', 'reports.export',
+                'analytics.view',
+                'admin.manage_settings', 'admin.manage_agencies',
+                'admin.manage_statuses', 'admin.manage_pricing', 'admin.manage_notifications',
+                'admin.manage_newsletter', 'admin.manage_documents',
+                'rbac.manage_users', 'rbac.view_roles', 'rbac.view_menus',
             ],
             'operator' => [
-                'view_shipments', 'create_shipments', 'edit_shipments',
-                'view_lockers', 'manage_lockers', 'view_payments',
-                'manage_pre_alerts', 'manage_assisted_purchases',
-                'manage_pickups', 'assign_drivers',
-                'view_regroupements', 'create_regroupements',
-                'view_inbound',
-                'manage_customer_packages', 'view_customer_packages',
-                'view_tracking',
-                'manage_refunds',
-                'view_reports',
+                'shipments.view', 'shipments.create', 'shipments.edit',
+                'lockers.view', 'lockers.manage',
+                'finance.view_payments',
+                'operations.manage_pickups', 'operations.assign_drivers',
+                'operations.view_regroupements', 'operations.create_regroupements',
+                'assisted_purchase.manage',
+                'pre_alerts.manage', 'pre_alerts.view_inbound',
+                'customer_packages.view', 'customer_packages.manage',
+                'tracking.view',
+                'finance.manage_refunds',
+                'reports.view',
             ],
             'driver' => [
-                'manage_pickups', 'view_shipments', 'view_tracking',
+                'operations.manage_pickups', 'shipments.view', 'tracking.view',
             ],
             'customs_agent' => [
-                'view_shipments', 'edit_shipments', 'view_tracking',
+                'shipments.view', 'shipments.edit', 'tracking.view',
             ],
             'client' => [
-                'view_shipments', 'view_lockers',
-                'manage_pre_alerts', 'manage_assisted_purchases',
-                'view_customer_packages', 'view_tracking',
+                'shipments.view', 'lockers.view',
+                'pre_alerts.manage', 'assisted_purchase.manage',
+                'customer_packages.view', 'tracking.view',
             ],
         ];
 

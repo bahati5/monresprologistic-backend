@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class QuoteSnapshot extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'assisted_purchase_id',
         'version',
@@ -65,7 +68,7 @@ class QuoteSnapshot extends Model
 
     public function isPending(): bool
     {
-        return $this->client_response === 'pending' && !$this->isExpired();
+        return $this->client_response === 'pending' && ! $this->isExpired();
     }
 
     public function scopeLatest($query)

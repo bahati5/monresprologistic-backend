@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 
 class NewsletterSubscriber extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'email',
         'name',

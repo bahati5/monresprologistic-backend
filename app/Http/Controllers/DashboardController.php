@@ -12,6 +12,7 @@ use App\Models\PaymentProof;
 use App\Models\Pickup;
 use App\Models\PreAlert;
 use App\Models\Profile;
+use App\Models\SavTicket;
 use App\Models\Shipment;
 use App\Models\ShipmentLog;
 use App\Models\User;
@@ -197,8 +198,27 @@ class DashboardController extends Controller
             ->whereBetween('paid_at', [$lastMonthStart, $lastMonthEnd])
             ->sum('amount');
 
+        $savBase = SavTicket::query()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id));
+        $savOpenCount = (clone $savBase)->whereIn('status', ['open', 'in_progress', 'waiting_client', 'escalated'])->count();
+        $savResolvedToday = (clone $savBase)->whereDate('resolved_at', today())->count();
+        $savEscalated = (clone $savBase)->where('status', 'escalated')->count();
+        $savSlaAtRisk = (clone $savBase)
+            ->whereNotNull('sla_deadline_at')
+            ->whereIn('status', ['open', 'in_progress'])
+            ->where('sla_deadline_at', '<=', now()->addHours(2))
+            ->count();
+
+        $shipmentsInTransit = (clone $shipmentsStatsQ)->where('status', ShipmentStatus::InTransit)->count();
+
+        $assistedBase = AssistedPurchase::query()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id));
+        $assistedToday = (clone $assistedBase)->whereDate('created_at', today())->count();
+        $assistedQuotesPending = (clone $assistedBase)->where('status', 'pending')->count();
+
         $stats = [
             'shipments_total' => (clone $shipmentsStatsQ)->count(),
+            'shipments_in_transit' => $shipmentsInTransit,
             'pre_alerts' => $preAlertsPending,
             'pre_alerts_pending' => $preAlertsPending,
             'pickups_count' => $pickupsToday,
@@ -208,6 +228,12 @@ class DashboardController extends Controller
             'clients_count' => $clientsCount,
             'shipments_trend' => $this->trendPercent((float) $shipmentsThisMonth, (float) $shipmentsLastMonth),
             'revenue_trend' => $this->trendPercent($monthlyRevenue, $monthlyRevenueLast),
+            'sav_open' => $savOpenCount,
+            'sav_resolved_today' => $savResolvedToday,
+            'sav_escalated' => $savEscalated,
+            'sav_sla_at_risk' => $savSlaAtRisk,
+            'assisted_today' => $assistedToday,
+            'assisted_quotes_pending' => $assistedQuotesPending,
         ];
 
         $payload = [
@@ -220,6 +246,12 @@ class DashboardController extends Controller
             'recent_activity' => $this->buildRecentActivity($shipmentsQ),
             'recent_shipments' => (clone $shipmentsQ)->with(['senderProfile', 'recipientProfile'])->latest()->take(10)->get(),
         ];
+
+        $payload['urgent_actions'] = $this->buildUrgentActions($user, $savBase);
+        $payload['pending_dossiers'] = $this->buildPendingDossiers($user);
+        $payload['today_activity'] = $this->buildTodayActivity($user);
+        $payload['system_alerts'] = $this->buildSystemAlerts($user);
+        $payload['handover'] = $this->buildHandoverSection($user);
 
         if ($dashboardType === 'admin') {
             $payload['hubs'] = Hub::query()->orderBy('sort_order')->get()->map(fn ($h) => [
@@ -332,6 +364,252 @@ class DashboardController extends Controller
                 'type' => 'status',
             ];
         })->values()->all();
+    }
+
+    protected function buildUrgentActions(User $user, $savBase): array
+    {
+        $actions = [];
+
+        $urgentTickets = (clone $savBase)
+            ->whereIn('status', ['open', 'in_progress'])
+            ->where('priority', 'urgent')
+            ->orderBy('sla_deadline_at')
+            ->limit(5)
+            ->get();
+
+        foreach ($urgentTickets as $t) {
+            $actions[] = [
+                'type' => 'sav_urgent',
+                'label' => "{$t->reference_code} · {$t->subject}",
+                'detail' => $t->client?->name ?? 'Client inconnu',
+                'href' => "/sav/{$t->uuid}",
+                'sla_remaining' => $t->sla_remaining_minutes,
+            ];
+        }
+
+        $pendingProofs = PaymentProof::query()
+            ->where('status', 'pending')
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->whereHas('invoice.shipment', fn ($s) => $s->where('agency_id', $user->agency_id)))
+            ->latest()
+            ->limit(3)
+            ->with('invoice')
+            ->get();
+
+        foreach ($pendingProofs as $pp) {
+            $actions[] = [
+                'type' => 'payment_proof',
+                'label' => "Paiement à valider · {$pp->amount} {$pp->invoice?->currency}",
+                'detail' => $pp->created_at?->diffForHumans(),
+                'href' => '/finance/payment-proofs',
+            ];
+        }
+
+        return $actions;
+    }
+
+    protected function buildPendingDossiers(User $user): array
+    {
+        $dossiers = [];
+
+        $quotesToSend = AssistedPurchase::query()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+            ->where('status', 'pending')
+            ->with('user')
+            ->orderBy('created_at')
+            ->limit(5)
+            ->get();
+
+        foreach ($quotesToSend as $ap) {
+            $dossiers[] = [
+                'type' => 'quote_to_send',
+                'section' => 'Devis à envoyer',
+                'label' => $ap->reference_code ?? "AA-{$ap->id}",
+                'detail' => ($ap->user?->name ?? 'Client') . ' · Reçu ' . ($ap->created_at?->diffForHumans() ?? ''),
+                'href' => "/purchase-orders/{$ap->id}/chiffrage",
+                'action_label' => 'Créer devis',
+            ];
+        }
+
+        $hubPackages = PreAlert::query()
+            ->actionableInboundQueue()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->whereHas('user', fn ($u) => $u->where('agency_id', $user->agency_id)))
+            ->with('user')
+            ->orderBy('created_at')
+            ->limit(5)
+            ->get();
+
+        foreach ($hubPackages as $pa) {
+            $dossiers[] = [
+                'type' => 'hub_reception',
+                'section' => 'Colis à réceptionner au hub',
+                'label' => $pa->reference_code ?? "PA-{$pa->id}",
+                'detail' => ($pa->user?->name ?? '') . ' · ' . ($pa->created_at?->diffForHumans() ?? ''),
+                'href' => "/shipment-notices",
+                'action_label' => 'Réceptionner',
+            ];
+        }
+
+        $toConvert = AssistedPurchase::query()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+            ->where('status', 'at_hub')
+            ->with('user')
+            ->orderBy('updated_at')
+            ->limit(5)
+            ->get();
+
+        foreach ($toConvert as $ap) {
+            $days = $ap->updated_at ? (int) now()->diffInDays($ap->updated_at) : 0;
+            $dossiers[] = [
+                'type' => 'convert_shipment',
+                'section' => 'Conversions en expédition',
+                'label' => $ap->reference_code ?? "AA-{$ap->id}",
+                'detail' => "AT_HUB depuis {$days}j",
+                'href' => "/purchase-orders/{$ap->id}",
+                'action_label' => 'Convertir',
+            ];
+        }
+
+        return $dossiers;
+    }
+
+    protected function buildTodayActivity(User $user): array
+    {
+        $thisMonth = now()->startOfMonth();
+
+        $shipmentsQ = Shipment::query();
+        $this->scopeShipmentsForUser($shipmentsQ, $user);
+        $shipmentsQ->excludingDrafts();
+
+        $assistedBase = AssistedPurchase::query()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id));
+
+        $savBase = SavTicket::query()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id));
+
+        $invBase = $this->scopedInvoices($user);
+
+        return [
+            'expeditions' => [
+                'created_today' => (clone $shipmentsQ)->whereDate('created_at', today())->count(),
+                'in_transit' => (clone $shipmentsQ)->where('status', ShipmentStatus::InTransit)->count(),
+                'arrived' => (clone $shipmentsQ)->where('status', ShipmentStatus::ArrivedAtDestination)->whereDate('updated_at', today())->count(),
+                'delivered' => (clone $shipmentsQ)->where('status', ShipmentStatus::Delivered)->whereDate('updated_at', today())->count(),
+            ],
+            'achat_assiste' => [
+                'received_today' => (clone $assistedBase)->whereDate('created_at', today())->count(),
+                'quotes_sent' => (clone $assistedBase)->whereIn('status', ['quote_sent', 'accepted', 'paid', 'ordered', 'at_hub', 'converted'])->where('created_at', '>=', $thisMonth)->count(),
+                'accepted_today' => (clone $assistedBase)->where('status', 'accepted')->whereDate('updated_at', today())->count(),
+                'pending_payment' => (clone $assistedBase)->where('status', 'accepted')->count(),
+            ],
+            'sav' => [
+                'open' => (clone $savBase)->whereIn('status', ['open', 'in_progress', 'waiting_client', 'escalated'])->count(),
+                'resolved_today' => (clone $savBase)->whereDate('resolved_at', today())->count(),
+                'sla_rate' => $this->computeSlaRate($savBase, $thisMonth),
+                'escalated' => (clone $savBase)->where('status', 'escalated')->count(),
+            ],
+            'finance' => [
+                'revenue_today' => round((float) (clone $invBase)->where('status', 'paid')->whereDate('paid_at', today())->sum('amount'), 2),
+                'payments_received' => (clone $invBase)->where('status', 'paid')->whereDate('paid_at', today())->count(),
+                'refunds' => 0,
+                'pending_validation' => PaymentProof::query()->where('status', 'pending')
+                    ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->whereHas('invoice.shipment', fn ($s) => $s->where('agency_id', $user->agency_id)))->count(),
+            ],
+        ];
+    }
+
+    protected function computeSlaRate($savBase, $thisMonth): int
+    {
+        $slaRespected = (clone $savBase)
+            ->where('created_at', '>=', $thisMonth)
+            ->whereNotNull('first_response_at')
+            ->whereNotNull('sla_deadline_at')
+            ->whereRaw('first_response_at <= sla_deadline_at')
+            ->count();
+        $slaTotal = (clone $savBase)
+            ->where('created_at', '>=', $thisMonth)
+            ->whereNotNull('first_response_at')
+            ->count();
+
+        return $slaTotal > 0 ? (int) round(100 * $slaRespected / $slaTotal) : 0;
+    }
+
+    protected function buildSystemAlerts(User $user): array
+    {
+        $alerts = [];
+
+        $overdueShipments = Shipment::query();
+        $this->scopeShipmentsForUser($overdueShipments, $user);
+        $overdueCount = (clone $overdueShipments)
+            ->where('status', ShipmentStatus::InTransit)
+            ->where('created_at', '<', now()->subDays(14))
+            ->count();
+
+        if ($overdueCount > 0) {
+            $alerts[] = [
+                'level' => 'warning',
+                'message' => "{$overdueCount} expédition(s) en transit depuis plus de 14 jours",
+                'href' => '/analytics/overdue',
+            ];
+        }
+
+        $escalatedTickets = SavTicket::query()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+            ->where('status', 'escalated')
+            ->count();
+
+        if ($escalatedTickets > 0) {
+            $alerts[] = [
+                'level' => 'warning',
+                'message' => "{$escalatedTickets} ticket(s) SAV escaladé(s) en attente",
+                'href' => '/sav?status=escalated',
+            ];
+        }
+
+        $overdueInvoices = Invoice::query()
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+            ->whereNotIn('status', ['paid', 'cancelled', 'draft'])
+            ->whereNotNull('due_at')
+            ->where('due_at', '<', now())
+            ->count();
+
+        if ($overdueInvoices > 0) {
+            $alerts[] = [
+                'level' => 'warning',
+                'message' => "{$overdueInvoices} facture(s) en retard de paiement",
+                'href' => '/finance/invoices?status=overdue',
+            ];
+        }
+
+        return $alerts;
+    }
+
+    protected function buildHandoverSection(User $user): array
+    {
+        $colleagues = User::query()
+            ->where('id', '!=', $user->id)
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', ['operator', 'agency_admin']))
+            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
+            ->withCount(['savTicketsAssigned as open_tickets_count' => fn ($q) => $q->whereIn('status', ['open', 'in_progress', 'waiting_client'])])
+            ->having('open_tickets_count', '>', 0)
+            ->limit(5)
+            ->get();
+
+        return $colleagues->map(fn ($c) => [
+            'user_name' => $c->name,
+            'open_count' => $c->open_tickets_count,
+            'dossiers' => SavTicket::where('assigned_to', $c->id)
+                ->whereIn('status', ['open', 'in_progress', 'waiting_client'])
+                ->orderByDesc('updated_at')
+                ->limit(3)
+                ->get()
+                ->map(fn ($t) => [
+                    'reference' => $t->reference_code,
+                    'subject' => $t->subject,
+                    'status' => $t->status_label,
+                    'last_active' => $t->updated_at?->diffForHumans(),
+                    'href' => "/sav/{$t->uuid}",
+                ]),
+        ])->all();
     }
 
     protected function scopedPreAlerts($user)

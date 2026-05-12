@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class InvoiceExtraLine extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'invoice_id', 'billing_extra_id', 'label', 'calculation_description',
         'type', 'value', 'amount', 'sort_order',

@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class QuoteEmailTemplate extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'agency_id',
         'event',
@@ -52,7 +55,7 @@ class QuoteEmailTemplate extends Model
     private function replaceVariables(string $template, array $variables): string
     {
         foreach ($variables as $key => $value) {
-            $template = str_replace('{{' . $key . '}}', (string) $value, $template);
+            $template = str_replace('{{'.$key.'}}', (string) $value, $template);
         }
 
         return $template;

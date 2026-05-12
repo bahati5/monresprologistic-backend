@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Zone extends Model
 {
+    use HasUuid;
+
     protected $fillable = ['agency_id', 'name', 'polygon', 'is_active'];
 
     protected function casts(): array

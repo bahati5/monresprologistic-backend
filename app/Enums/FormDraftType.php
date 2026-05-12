@@ -27,7 +27,7 @@ enum FormDraftType: string
     {
         return match ($this) {
             self::Shipment => '/shipments/create',
-            self::PreAlert => '/shipment-notices/create',
+            self::PreAlert => '/shipment-notices',
             self::AssistedPurchase => '/shopping-assiste/nouveau',
             self::Quote => '/purchase-orders',
             self::RefundRequest => '/finance/refunds',

@@ -7,8 +7,8 @@ use Illuminate\Database\Seeder;
 class DatabaseSeeder extends Seeder
 {
     /**
-     * Base minimale : rôles / permissions, référentiel pays (drapeaux via emoji), super admin.
-     * Le reste (agences, statuts, lignes commerciales, clients, etc.) se crée dans l’application.
+     * Base : rôles / permissions (Spatie), **RbacSeeder** (menus, pages, groupes, `role_id`),
+     * référentiel pays, super admin, logistique, plateforme démo.
      *
      * Remise à zéro typique : php artisan migrate:fresh --seed
      */
@@ -22,6 +22,7 @@ class DatabaseSeeder extends Seeder
             MerchantSeeder::class,
             LogisticsSeeder::class,
             FullPlatformSeeder::class,
+            RbacSeeder::class,
         ]);
     }
 }

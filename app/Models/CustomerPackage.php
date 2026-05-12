@@ -3,12 +3,15 @@
 namespace App\Models;
 
 use App\Enums\ShipmentStatus;
+use App\Models\Concerns\HasUuid;
 use App\Support\ConfigurableReferenceCode;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CustomerPackage extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'reference_code',
         'user_id',

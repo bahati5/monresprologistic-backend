@@ -3,14 +3,17 @@
 namespace App\Models;
 
 use App\Enums\AssistedPurchaseStatus;
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
 
 class AssistedPurchase extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'user_id', 'status', 'operator_id', 'product_url', 'article_label', 'line_notes', 'notes', 'size', 'color', 'quantity',
         'price_displayed', 'price_currency', 'quote_amount', 'quote_currency', 'service_fee', 'bank_fee_percentage', 'payment_methods_note', 'supplier_tracking_number', 'total_amount',
@@ -103,10 +106,10 @@ class AssistedPurchase extends Model
     public static function generateReferenceCode(): string
     {
         $prefix = 'AP-';
-        $code = $prefix . strtoupper(\Illuminate\Support\Str::random(8));
+        $code = $prefix.strtoupper(Str::random(8));
 
-        while (static::where('line_notes', 'like', '%"reference_code":"' . $code . '"%')->exists()) {
-            $code = $prefix . strtoupper(\Illuminate\Support\Str::random(8));
+        while (static::where('line_notes', 'like', '%"reference_code":"'.$code.'"%')->exists()) {
+            $code = $prefix.strtoupper(Str::random(8));
         }
 
         return $code;
@@ -125,5 +128,13 @@ class AssistedPurchase extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(AssistedPurchasePayment::class)->orderByDesc('id');
+    }
+
+    /**
+     * Les routes API et le front utilisent l’id numérique ({@see HasUuid} imposerait uuid).
+     */
+    public function getRouteKeyName(): string
+    {
+        return 'id';
     }
 }

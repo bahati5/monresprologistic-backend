@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ShipLineRate extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'ship_line_id',
         'shipping_mode_id',

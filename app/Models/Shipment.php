@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ShipmentStatus;
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,6 +11,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Shipment extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'public_tracking',
         'invoice_document_number',

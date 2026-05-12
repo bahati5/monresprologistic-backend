@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ShipmentStatus;
+use App\Models\Concerns\HasUuid;
 use App\Support\ConfigurableReferenceCode;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -14,7 +15,7 @@ use Spatie\MediaLibrary\InteractsWithMedia;
 
 class PreAlert extends Model implements HasMedia
 {
-    use InteractsWithMedia;
+    use HasUuid, InteractsWithMedia;
 
     protected $fillable = [
         'reference_code',

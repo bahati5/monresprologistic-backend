@@ -25,7 +25,6 @@ class PdfController extends Controller
     public function previewShipmentLabel(Shipment $shipment): JsonResponse
     {
         $this->authorize('view', $shipment);
-        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentLabelViewData($shipment, true);
         $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
@@ -44,7 +43,6 @@ class PdfController extends Controller
     public function previewShipmentInvoice(Shipment $shipment): JsonResponse
     {
         $this->authorize('view', $shipment);
-        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentInvoiceViewData($shipment, true);
         $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
@@ -60,7 +58,6 @@ class PdfController extends Controller
     public function shipmentInvoice(Shipment $shipment): Response
     {
         $this->authorize('view', $shipment);
-        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentInvoiceViewData($shipment, false);
         $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
@@ -74,7 +71,6 @@ class PdfController extends Controller
     public function shipmentLabel(Shipment $shipment): Response
     {
         $this->authorize('view', $shipment);
-        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentLabelViewData($shipment, false);
         $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
@@ -93,7 +89,6 @@ class PdfController extends Controller
     public function previewShipmentForm(Shipment $shipment): JsonResponse
     {
         $this->authorize('view', $shipment);
-        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentFormViewData($shipment, true);
         $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
@@ -109,7 +104,6 @@ class PdfController extends Controller
     public function shipmentForm(Shipment $shipment): Response
     {
         $this->authorize('view', $shipment);
-        $this->denyDriverCommercialPrinting();
 
         $data = $this->shipmentFormViewData($shipment, false);
         $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
@@ -154,7 +148,6 @@ class PdfController extends Controller
     public function trackingReport(Shipment $shipment): Response
     {
         $this->authorize('view', $shipment);
-        $this->denyDriverCommercialPrinting();
 
         $shipment->load([
             'logs' => fn ($q) => $q->with('user')->orderBy('created_at'),
@@ -234,7 +227,7 @@ class PdfController extends Controller
      * @return array<string, mixed>
      */
     /**
-     * §4 PRD — Les chauffeurs n’impriment pas factures / étiquettes / rapports commerciaux (bons de livraison OK).
+     * Colis / regroupements : réservé au personnel (pas les chauffeurs).
      */
     private function denyDriverCommercialPrinting(): void
     {
@@ -448,10 +441,37 @@ class PdfController extends Controller
     }
 
     /**
+     * Même périmètre que AssistedPurchaseController::authorizeView : propriétaire ou staff agence.
+     */
+    private function authorizeAssistedPurchaseQuoteAccess(AssistedPurchase $assisted_purchase): void
+    {
+        $user = auth()->user();
+        if (! $user instanceof User) {
+            abort(401);
+        }
+        if ((int) $assisted_purchase->user_id === (int) $user->id) {
+            return;
+        }
+        abort_unless(
+            $user->hasAnyRole(['super_admin', 'agency_admin', 'operator']),
+            403
+        );
+        $assisted_purchase->loadMissing('user');
+        if ($user->canAccessAllAgencies()) {
+            return;
+        }
+        abort_unless(
+            (int) $assisted_purchase->user?->agency_id === (int) $user->agency_id,
+            403
+        );
+    }
+
+    /**
      * §11 — PDF generation for assisted purchase quote.
      */
     public function assistedPurchaseQuote(AssistedPurchase $assisted_purchase): Response
     {
+        $this->authorizeAssistedPurchaseQuoteAccess($assisted_purchase);
         $data = $this->assistedPurchaseQuoteData($assisted_purchase, false);
         $data['doc'] = $this->docForDomPdfLogo($data['doc'] ?? []);
 
@@ -468,6 +488,7 @@ class PdfController extends Controller
      */
     public function previewAssistedPurchaseQuote(AssistedPurchase $assisted_purchase): JsonResponse
     {
+        $this->authorizeAssistedPurchaseQuoteAccess($assisted_purchase);
         $data = $this->assistedPurchaseQuoteData($assisted_purchase, true);
         $data['doc'] = $this->withAbsoluteLogoUrlForHtmlPreview($data['doc'] ?? []);
         $html = view('pdf.assisted-purchase-quote', $data)->render();

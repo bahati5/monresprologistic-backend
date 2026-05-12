@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 
 class SyncError extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'integration',
         'event_type',

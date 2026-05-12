@@ -3,12 +3,15 @@
 namespace App\Models;
 
 use App\Enums\FormDraftType;
+use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class FormDraft extends Model
 {
+    use HasUuid;
+
     protected $fillable = [
         'user_id',
         'form_type',

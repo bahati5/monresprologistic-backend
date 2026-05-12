@@ -1,30 +1,44 @@
 <?php
 
+use App\Http\Controllers\ActivityLogController;
 use App\Http\Controllers\AddressBookController;
+use App\Http\Controllers\AnalyticsController;
+use App\Http\Controllers\AnalyticsDashboardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\LocationCascadeController;
 use App\Http\Controllers\Api\ShipmentWizardController;
 use App\Http\Controllers\AssistedPurchaseAnalyticsController;
 use App\Http\Controllers\AssistedPurchaseController;
 use App\Http\Controllers\AssistedPurchasePublicController;
-use App\Http\Controllers\InboundEmailController;
+use App\Http\Controllers\Auth\NewPasswordController;
+use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\BackupController;
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\ClientPortalController;
+use App\Http\Controllers\CommentController;
+use App\Http\Controllers\CurrencyController;
 use App\Http\Controllers\CustomerPackageController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DriverController;
 use App\Http\Controllers\FinanceDashboardController;
+use App\Http\Controllers\FlexPayController;
 use App\Http\Controllers\FormDraftController;
+use App\Http\Controllers\InboundEmailController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\LedgerController;
 use App\Http\Controllers\LockerController;
 use App\Http\Controllers\MerchantController;
+use App\Http\Controllers\NetworkPrintController;
 use App\Http\Controllers\NewsletterController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\OfflineSyncController;
 use App\Http\Controllers\PaymentProofController;
 use App\Http\Controllers\PdfController;
 use App\Http\Controllers\PickupController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\QuoteDashboardController;
+use App\Http\Controllers\QuoteResponseController;
+use App\Http\Controllers\RbacController;
 use App\Http\Controllers\RefundController;
 use App\Http\Controllers\RegroupementController;
 use App\Http\Controllers\ReportController;
@@ -34,30 +48,39 @@ use App\Http\Controllers\Settings\AgencyPaymentCoordinateController;
 use App\Http\Controllers\Settings\AppSettingController;
 use App\Http\Controllers\Settings\ArticleCategoryController;
 use App\Http\Controllers\Settings\BillingExtraController;
+use App\Http\Controllers\Settings\ExchangeRateController;
 use App\Http\Controllers\Settings\LocationController;
 use App\Http\Controllers\Settings\NotificationTemplateController;
 use App\Http\Controllers\Settings\PackagingTypeController;
 use App\Http\Controllers\Settings\PaymentGatewayController;
 use App\Http\Controllers\Settings\PaymentMethodController;
+use App\Http\Controllers\Settings\PickupFailureReasonController;
 use App\Http\Controllers\Settings\PricingRuleController;
+use App\Http\Controllers\Settings\QuoteLineTemplateController;
+use App\Http\Controllers\Settings\QuoteSettingsController;
+use App\Http\Controllers\Settings\QuoteTemplateController;
+use App\Http\Controllers\Settings\RolePermissionController;
 use App\Http\Controllers\Settings\SettingsHubController;
 use App\Http\Controllers\Settings\ShipLineController;
 use App\Http\Controllers\Settings\ShippingModeController;
 use App\Http\Controllers\Settings\SmtpConfigController;
+use App\Http\Controllers\Settings\SyncErrorController;
 use App\Http\Controllers\Settings\TransportCompanyController;
 use App\Http\Controllers\Settings\TwilioConfigController;
-use App\Http\Controllers\Settings\PickupFailureReasonController;
-use App\Http\Controllers\Settings\RolePermissionController;
 use App\Http\Controllers\Settings\ZoneController;
-use App\Http\Controllers\QuoteDashboardController;
-use App\Http\Controllers\QuoteResponseController;
-use App\Http\Controllers\Settings\QuoteLineTemplateController;
-use App\Http\Controllers\Settings\QuoteSettingsController;
-use App\Http\Controllers\Settings\QuoteTemplateController;
+use App\Http\Controllers\FinanceAnalyticsController;
+use App\Http\Controllers\SavAnalyticsController;
+use App\Http\Controllers\SavTicketController;
+use App\Http\Controllers\ShipmentAnalyticsController;
+use App\Http\Controllers\SuiviMonitoringController;
 use App\Http\Controllers\ShipmentController;
 use App\Http\Controllers\ShipmentNoticeController;
 use App\Http\Controllers\ThemeController;
+use App\Http\Controllers\TrackEventController;
+use App\Http\Controllers\TrackingController;
 use App\Http\Controllers\UserManagementController;
+use App\Http\Controllers\WebhookController;
+use App\Http\Controllers\WordPressFormController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -81,13 +104,16 @@ Route::get('/locations/timezones', [LocationCascadeController::class, 'timezones
 Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
     Route::post('register', [AuthController::class, 'register']);
-    Route::post('forgot-password', [\App\Http\Controllers\Auth\PasswordResetLinkController::class, 'store']);
-    Route::post('reset-password', [\App\Http\Controllers\Auth\NewPasswordController::class, 'store']);
+    Route::post('forgot-password', [PasswordResetLinkController::class, 'store']);
+    Route::post('reset-password', [NewPasswordController::class, 'store']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('user', [AuthController::class, 'user']);
         Route::post('logout', [AuthController::class, 'logout']);
         Route::post('token', [AuthController::class, 'createToken']);
+        Route::get('me/permissions', [RbacController::class, 'myPermissions']);
+        Route::get('me/navigation', [RbacController::class, 'myNavigation']);
+        Route::post('check-permissions', [RbacController::class, 'checkPermissions']);
     });
 });
 
@@ -106,8 +132,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('dashboard/regroupements', [SectionDashboardController::class, 'regroupements']);
     Route::get('dashboard/crm', [SectionDashboardController::class, 'crm']);
     Route::get('dashboard/reports', [SectionDashboardController::class, 'reports']);
-    Route::get('dashboard/analytics', [\App\Http\Controllers\AnalyticsDashboardController::class, 'analytics'])->middleware('permission:view_analytics');
-    Route::get('dashboard/overdue', [\App\Http\Controllers\AnalyticsDashboardController::class, 'overdue'])->middleware('permission:view_analytics');
+    Route::get('dashboard/analytics', [AnalyticsDashboardController::class, 'analytics'])->middleware('effective_permission:analytics.view');
+    Route::get('dashboard/overdue', [AnalyticsDashboardController::class, 'overdue'])->middleware('effective_permission:analytics.view');
 
     // --- Form Drafts ---
     Route::apiResource('drafts', FormDraftController::class)
@@ -115,21 +141,22 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Client Portal ---
     Route::prefix('client')->group(function () {
-        Route::get('dashboard', [\App\Http\Controllers\ClientPortalController::class, 'dashboard']);
-        Route::get('locker', [\App\Http\Controllers\ClientPortalController::class, 'locker']);
-        Route::get('invoices', [\App\Http\Controllers\ClientPortalController::class, 'invoices']);
-        Route::get('notification-preferences', [\App\Http\Controllers\ClientPortalController::class, 'notificationPreferences']);
-        Route::patch('notification-preferences', [\App\Http\Controllers\ClientPortalController::class, 'updateNotificationPreferences']);
+        Route::get('dashboard', [ClientPortalController::class, 'dashboard']);
+        Route::get('locker', [ClientPortalController::class, 'locker']);
+        Route::get('invoices', [ClientPortalController::class, 'invoices']);
+        Route::get('notification-preferences', [ClientPortalController::class, 'notificationPreferences']);
+        Route::patch('notification-preferences', [ClientPortalController::class, 'updateNotificationPreferences']);
     });
 
     // --- Profile & Theme ---
     Route::get('profile', [ProfileController::class, 'show']);
     Route::patch('profile', [ProfileController::class, 'update']);
+    Route::post('profile/avatar', [ProfileController::class, 'uploadAvatar']);
     Route::delete('profile', [ProfileController::class, 'destroy']);
     Route::patch('theme', [ThemeController::class, 'update']);
 
     // --- Locker ---
-    Route::get('locker', [LockerController::class, 'show'])->middleware('permission:view_lockers');
+    Route::get('locker', [LockerController::class, 'show'])->middleware('effective_permission:lockers.view');
 
     // --- Customer Packages ---
     Route::get('customer-packages', [CustomerPackageController::class, 'index']);
@@ -151,93 +178,106 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('assisted-purchases', [AssistedPurchaseController::class, 'store']);
     Route::get('assisted-purchases/{assisted_purchase}', [AssistedPurchaseController::class, 'show']);
     Route::post('assisted-purchases/{assisted_purchase}/quote-preview', [AssistedPurchaseController::class, 'quotePreview'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/quote', [AssistedPurchaseController::class, 'quote'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/mark-ordered', [AssistedPurchaseController::class, 'markAsOrdered'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/resend-quote', [AssistedPurchaseController::class, 'resendQuote'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/mark-paid', [AssistedPurchaseController::class, 'markPaid'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/publish-payment-request', [AssistedPurchaseController::class, 'publishPaymentRequest'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/reject-payment-proof', [AssistedPurchaseController::class, 'rejectPaymentProof'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/update-status', [AssistedPurchaseController::class, 'updateStatus'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/client-payment-ack', [AssistedPurchaseController::class, 'clientPaymentAck']);
     Route::get('assisted-purchases/{assisted_purchase}/payment-proof', [AssistedPurchaseController::class, 'downloadPaymentProof']);
     Route::post('assisted-purchases/extract-product', [AssistedPurchaseController::class, 'extractProduct']);
     Route::get('assisted-purchases/extract-product/{cacheKey}', [AssistedPurchaseController::class, 'extractProductResult']);
     Route::post('assisted-purchases/{assisted_purchase}/convert-to-shipment', [AssistedPurchaseController::class, 'convertToShipment'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/quote-dynamic', [AssistedPurchaseController::class, 'quoteDynamic'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/revision', [AssistedPurchaseController::class, 'createRevision'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/clarification', [AssistedPurchaseController::class, 'sendClarification'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/report-item-unavailable', [AssistedPurchaseController::class, 'reportItemUnavailable'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('assisted-purchases/{assisted_purchase}/report-price-change', [AssistedPurchaseController::class, 'reportPriceChange'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
 
     // --- Quote Line Templates (Settings) ---
     Route::get('quote-line-templates', [QuoteLineTemplateController::class, 'index'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::get('quote-line-templates/active', [QuoteLineTemplateController::class, 'active'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('quote-line-templates', [QuoteLineTemplateController::class, 'store'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::put('quote-line-templates/{quoteLineTemplate}', [QuoteLineTemplateController::class, 'update'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::delete('quote-line-templates/{quoteLineTemplate}', [QuoteLineTemplateController::class, 'destroy'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('quote-line-templates/reorder', [QuoteLineTemplateController::class, 'reorder'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
 
     // --- Quote Templates (Settings) ---
     Route::get('quote-templates', [QuoteTemplateController::class, 'index'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('quote-templates', [QuoteTemplateController::class, 'store'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::put('quote-templates/{quoteTemplate}', [QuoteTemplateController::class, 'update'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::delete('quote-templates/{quoteTemplate}', [QuoteTemplateController::class, 'destroy'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
 
     // --- Quote Settings (currency, follow-up, email templates, audit) ---
     Route::get('settings/quote-currency', [QuoteSettingsController::class, 'currency'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::put('settings/quote-currency', [QuoteSettingsController::class, 'updateCurrency'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::get('settings/quote-follow-up', [QuoteSettingsController::class, 'followUp'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::put('settings/quote-follow-up', [QuoteSettingsController::class, 'updateFollowUp'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::get('settings/quote-email-templates', [QuoteSettingsController::class, 'emailTemplates'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::patch('settings/quote-email-templates/{quoteEmailTemplate}', [QuoteSettingsController::class, 'updateEmailTemplate'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('settings/quote-email-templates/{quoteEmailTemplate}/preview', [QuoteSettingsController::class, 'previewEmailTemplate'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::get('settings/quote-templates/audit-log', [QuoteSettingsController::class, 'auditLog'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
 
     // --- Quote Dashboard ---
     Route::get('quotes/dashboard/metrics', [QuoteDashboardController::class, 'metrics'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::get('quotes/dashboard/list', [QuoteDashboardController::class, 'list'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('quotes/{assistedPurchase}/prolong', [QuoteDashboardController::class, 'prolong'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
     Route::post('quotes/{assistedPurchase}/cancel-reminders', [QuoteDashboardController::class, 'cancelReminders'])
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
 
     // --- Analytics Achat Assisté ---
     Route::get('analytics/assisted-purchase', AssistedPurchaseAnalyticsController::class)
-        ->middleware('permission:manage_assisted_purchases');
+        ->middleware('effective_permission:assisted_purchase.manage');
+
+    // --- Analytics SAV / Expéditions / Finance ---
+    Route::get('analytics/sav', SavAnalyticsController::class)->middleware('effective_permission:analytics.view');
+    Route::get('analytics/shipments', ShipmentAnalyticsController::class)->middleware('effective_permission:analytics.view');
+    Route::get('analytics/finance', FinanceAnalyticsController::class)->middleware('effective_permission:analytics.view');
+
+    // --- Suivi (monitoring proactif) ---
+    Route::prefix('suivi')->middleware('effective_permission:suivi.view')->group(function () {
+        Route::get('dashboard', [SuiviMonitoringController::class, 'dashboard']);
+        Route::get('board', [SuiviMonitoringController::class, 'board']);
+        Route::get('delayed', [SuiviMonitoringController::class, 'delayedShipments']);
+        Route::get('active-orders', [SuiviMonitoringController::class, 'activeOrders']);
+    });
 
     // --- Shipments ---
     Route::get('shipments', [ShipmentController::class, 'index']);
@@ -277,32 +317,53 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('states/{state}/cities', [LocationCascadeController::class, 'cities']);
     });
 
-    // --- Regroupements (| = OU Spatie : compat. noms legacy view/create/manage_consolidations)
-    Route::get('regroupements', [RegroupementController::class, 'index'])->middleware('permission:view_regroupements|view_consolidations|manage_regroupements|manage_consolidations');
-    Route::get('regroupements/suggestions', [RegroupementController::class, 'suggestions'])->middleware('permission:create_regroupements|manage_regroupements');
-    Route::post('regroupements', [RegroupementController::class, 'store'])->middleware('permission:create_regroupements|create_consolidations|manage_regroupements|manage_consolidations');
-    Route::post('regroupements/{regroupement}/shipments', [RegroupementController::class, 'attachShipment'])->middleware('permission:create_regroupements|create_consolidations|manage_regroupements|manage_consolidations');
-    Route::post('regroupements/{regroupement}/attach-shipments', [RegroupementController::class, 'attachShipments'])->middleware('permission:create_regroupements|create_consolidations|manage_regroupements|manage_consolidations');
-    Route::patch('regroupements/{regroupement}/status', [RegroupementController::class, 'updateStatus'])->middleware('permission:view_regroupements|view_consolidations|manage_regroupements|manage_consolidations');
+    // --- Regroupements ---
+    Route::get('regroupements', [RegroupementController::class, 'index'])->middleware('effective_permission_any:operations.view_regroupements,operations.manage_regroupements');
+    Route::get('regroupements/suggestions', [RegroupementController::class, 'suggestions'])->middleware('effective_permission_any:operations.create_regroupements,operations.manage_regroupements');
+    Route::post('regroupements', [RegroupementController::class, 'store'])->middleware('effective_permission_any:operations.create_regroupements,operations.manage_regroupements');
+    Route::post('regroupements/{regroupement}/shipments', [RegroupementController::class, 'attachShipment'])->middleware('effective_permission_any:operations.create_regroupements,operations.manage_regroupements');
+    Route::post('regroupements/{regroupement}/attach-shipments', [RegroupementController::class, 'attachShipments'])->middleware('effective_permission_any:operations.create_regroupements,operations.manage_regroupements');
+    Route::patch('regroupements/{regroupement}/status', [RegroupementController::class, 'updateStatus'])->middleware('effective_permission_any:operations.view_regroupements,operations.manage_regroupements');
 
     // --- Pickups ---
     Route::get('pickups', [PickupController::class, 'index']);
     Route::post('pickups', [PickupController::class, 'store']);
-    Route::post('pickups/{pickup}/assign', [PickupController::class, 'assign'])->middleware('permission:assign_drivers');
+    Route::post('pickups/{pickup}/assign', [PickupController::class, 'assign'])->middleware('effective_permission:operations.assign_drivers');
     Route::post('pickups/{pickup}/update-status', [PickupController::class, 'updateStatus']);
     Route::post('pickups/{pickup}/completion-photo', [PickupController::class, 'uploadCompletionPhoto']);
     Route::get('pickup-failure-reasons', [PickupFailureReasonController::class, 'indexForOperations']);
 
     // --- Comments ---
-    Route::get('comments', [\App\Http\Controllers\CommentController::class, 'index']);
-    Route::post('comments', [\App\Http\Controllers\CommentController::class, 'store']);
-    Route::delete('comments/{comment}', [\App\Http\Controllers\CommentController::class, 'destroy']);
+    Route::get('comments', [CommentController::class, 'index']);
+    Route::post('comments', [CommentController::class, 'store']);
+    Route::delete('comments/{comment}', [CommentController::class, 'destroy']);
 
     // --- Devises (conversion indicative, lecture taux en base) ---
-    Route::post('currency/convert', [\App\Http\Controllers\CurrencyController::class, 'convert']);
+    Route::post('currency/convert', [CurrencyController::class, 'convert']);
 
     /** Reprise file hors-ligne (PRD ERR-01) */
-    Route::post('sync/offline-queue', [\App\Http\Controllers\OfflineSyncController::class, 'processQueue']);
+    Route::post('sync/offline-queue', [OfflineSyncController::class, 'processQueue']);
+
+    // --- SAV Tickets ---
+    Route::prefix('sav')->group(function () {
+        Route::middleware('effective_permission_any:sav.view,sav.manage,sav.client')->group(function () {
+            Route::get('tickets', [SavTicketController::class, 'index']);
+            Route::get('tickets/{savTicket}', [SavTicketController::class, 'show']);
+            Route::get('quick-replies', [SavTicketController::class, 'quickReplies']);
+        });
+        Route::middleware('effective_permission_any:sav.manage,sav.client')->group(function () {
+            Route::post('tickets', [SavTicketController::class, 'store']);
+            Route::post('tickets/{savTicket}/reply', [SavTicketController::class, 'reply']);
+        });
+        Route::middleware('effective_permission:sav.manage')->group(function () {
+            Route::patch('tickets/{savTicket}', [SavTicketController::class, 'update']);
+            Route::post('tickets/{savTicket}/assign', [SavTicketController::class, 'assign']);
+            Route::post('tickets/{savTicket}/status', [SavTicketController::class, 'updateStatus']);
+            Route::post('quick-replies', [SavTicketController::class, 'storeQuickReply']);
+            Route::patch('quick-replies/{savQuickReply}', [SavTicketController::class, 'updateQuickReply']);
+            Route::delete('quick-replies/{savQuickReply}', [SavTicketController::class, 'destroyQuickReply']);
+        });
+    });
 
     // --- Refunds ---
     Route::get('refunds', [RefundController::class, 'index']);
@@ -310,26 +371,26 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('refunds', [RefundController::class, 'store']);
     Route::get('refunds/{refund}', [RefundController::class, 'show']);
     Route::get('refunds/{refund}/request-proof', [RefundController::class, 'downloadRequestProof']);
-    Route::post('refunds/{refund}/approve', [RefundController::class, 'approve'])->middleware('permission:approve_refunds');
-    Route::post('refunds/{refund}/reject', [RefundController::class, 'reject'])->middleware('permission:approve_refunds');
-    Route::post('refunds/{refund}/process', [RefundController::class, 'process'])->middleware('permission:manage_refunds');
-    Route::post('refunds/{refund}/complete', [RefundController::class, 'complete'])->middleware('permission:manage_refunds');
+    Route::post('refunds/{refund}/approve', [RefundController::class, 'approve'])->middleware('effective_permission:finance.approve_refunds');
+    Route::post('refunds/{refund}/reject', [RefundController::class, 'reject'])->middleware('effective_permission:finance.approve_refunds');
+    Route::post('refunds/{refund}/process', [RefundController::class, 'process'])->middleware('effective_permission:finance.manage_refunds');
+    Route::post('refunds/{refund}/complete', [RefundController::class, 'complete'])->middleware('effective_permission:finance.manage_refunds');
 
     // --- Finance ---
-    Route::get('finance/dashboard', FinanceDashboardController::class)->middleware('permission:manage_finances');
+    Route::get('finance/dashboard', FinanceDashboardController::class)->middleware('effective_permission:finance.manage');
     Route::get('finance/invoices', [InvoiceController::class, 'index']);
-    Route::post('finance/invoices', [InvoiceController::class, 'store'])->middleware('permission:manage_finances');
-    Route::get('finance/billing-extras', [InvoiceController::class, 'billingExtrasCatalog'])->middleware('permission:manage_finances');
-    Route::post('finance/billing-extras', [InvoiceController::class, 'storeBillingExtra'])->middleware('permission:manage_finances');
+    Route::post('finance/invoices', [InvoiceController::class, 'store'])->middleware('effective_permission:finance.manage');
+    Route::get('finance/billing-extras', [InvoiceController::class, 'billingExtrasCatalog'])->middleware('effective_permission:finance.manage');
+    Route::post('finance/billing-extras', [InvoiceController::class, 'storeBillingExtra'])->middleware('effective_permission:finance.manage');
     Route::get('finance/payment-proofs', [PaymentProofController::class, 'index']);
     Route::post('finance/payment-proofs', [PaymentProofController::class, 'store']);
-    Route::post('finance/payment-proofs/{payment_proof}/approve', [PaymentProofController::class, 'approve'])->middleware('permission:approve_payments');
-    Route::post('finance/payment-proofs/{payment_proof}/reject', [PaymentProofController::class, 'reject'])->middleware('permission:approve_payments');
-    Route::get('finance/ledger', [LedgerController::class, 'index'])->middleware('permission:manage_finances');
-    Route::get('finance/ledger/export', [LedgerController::class, 'export'])->middleware('permission:manage_finances');
+    Route::post('finance/payment-proofs/{payment_proof}/approve', [PaymentProofController::class, 'approve'])->middleware('effective_permission:finance.approve_payments');
+    Route::post('finance/payment-proofs/{payment_proof}/reject', [PaymentProofController::class, 'reject'])->middleware('effective_permission:finance.approve_payments');
+    Route::get('finance/ledger', [LedgerController::class, 'index'])->middleware('effective_permission:finance.manage');
+    Route::get('finance/ledger/export', [LedgerController::class, 'export'])->middleware('effective_permission:finance.manage');
 
     // --- Reports ---
-    Route::prefix('reports')->name('reports.')->middleware('permission:view_reports')->group(function () {
+    Route::prefix('reports')->name('reports.')->middleware('effective_permission:reports.view')->group(function () {
         Route::get('/', [ReportController::class, 'summary']);
         Route::get('shipments', [ReportController::class, 'shipments']);
         Route::get('pickups', [ReportController::class, 'pickups']);
@@ -343,7 +404,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // --- Clients (Profile-based) ---
-    Route::middleware('permission:manage_clients')->group(function () {
+    Route::middleware('effective_permission:crm.manage_clients')->group(function () {
         Route::get('clients', [ClientController::class, 'index']);
         Route::get('clients/{client}', [ClientController::class, 'show']);
         Route::get('clients/{client}/activity', [ClientController::class, 'activity']);
@@ -360,15 +421,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('address-book/{addressBook}/set-default', [AddressBookController::class, 'setDefault']);
 
     // --- Users ---
-    Route::middleware('permission:manage_users')->group(function () {
+    Route::middleware('effective_permission_any:rbac.manage_users')->group(function () {
         Route::get('users', [UserManagementController::class, 'index']);
         Route::post('users', [UserManagementController::class, 'store']);
         Route::patch('users/{user}', [UserManagementController::class, 'update']);
         Route::post('users/{user}/toggle-active', [UserManagementController::class, 'toggleActive']);
+        Route::post('users/{user}/reset-password', [UserManagementController::class, 'resetPassword']);
     });
 
     // --- Drivers ---
-    Route::middleware('permission:manage_drivers')->group(function () {
+    Route::middleware('effective_permission:crm.manage_drivers')->group(function () {
         Route::get('drivers', [DriverController::class, 'index']);
         Route::post('drivers', [DriverController::class, 'store']);
         Route::patch('drivers/{driver}', [DriverController::class, 'update']);
@@ -384,7 +446,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('notifications/audit-log', [NotificationController::class, 'auditLog']);
 
     // --- Newsletter (admin) ---
-    Route::middleware('permission:manage_newsletter')->group(function () {
+    Route::middleware('effective_permission:admin.manage_newsletter')->group(function () {
         Route::get('newsletter/subscribers', [NewsletterController::class, 'index']);
         Route::delete('newsletter/subscribers/{subscriber}', [NewsletterController::class, 'destroy']);
     });
@@ -400,30 +462,28 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('shipments/{shipment}/pdf/delivery-note', [PdfController::class, 'deliveryNote']);
     Route::get('pickups/{pickup}/pdf/delivery-note', [PdfController::class, 'deliveryNotePickup']);
     Route::get('packages/{preAlert}/pdf/invoice', [PdfController::class, 'packageInvoice']);
-    Route::get('assisted-purchases/{assisted_purchase}/pdf/quote', [PdfController::class, 'assistedPurchaseQuote'])
-        ->middleware('permission:manage_assisted_purchases');
-    Route::get('assisted-purchases/{assisted_purchase}/preview/quote', [PdfController::class, 'previewAssistedPurchaseQuote'])
-        ->middleware('permission:manage_assisted_purchases');
+    Route::get('assisted-purchases/{assisted_purchase}/pdf/quote', [PdfController::class, 'assistedPurchaseQuote']);
+    Route::get('assisted-purchases/{assisted_purchase}/preview/quote', [PdfController::class, 'previewAssistedPurchaseQuote']);
 
     // --- FlexPay phase 2 ---
     Route::prefix('flexpay')->group(function () {
-        Route::post('initiate', [\App\Http\Controllers\FlexPayController::class, 'initiatePayment']);
-        Route::get('check/{orderNumber}', [\App\Http\Controllers\FlexPayController::class, 'checkStatus']);
+        Route::post('initiate', [FlexPayController::class, 'initiatePayment']);
+        Route::get('check/{orderNumber}', [FlexPayController::class, 'checkStatus']);
     });
 
     // §21.6 — Impression directe réseau
     Route::prefix('print')->group(function () {
-        Route::get('status', [\App\Http\Controllers\NetworkPrintController::class, 'status']);
-        Route::post('shipments/{shipment}/label', [\App\Http\Controllers\NetworkPrintController::class, 'printShipmentLabel']);
+        Route::get('status', [NetworkPrintController::class, 'status']);
+        Route::post('shipments/{shipment}/label', [NetworkPrintController::class, 'printShipmentLabel']);
     });
 
     // §10.5 — Rapport économies regroupement
     Route::get('regroupements/savings-report', [RegroupementController::class, 'savingsReport']);
 
     // §19 — Analytics : taux de conversion des devis achat assisté
-    Route::get('analytics/quote-conversion', [\App\Http\Controllers\AnalyticsController::class, 'quoteConversion'])
-        ->middleware('permission:view_reports');
-    Route::middleware('permission:manage_backups')->group(function () {
+    Route::get('analytics/quote-conversion', [AnalyticsController::class, 'quoteConversion'])
+        ->middleware('effective_permission:reports.view');
+    Route::middleware('effective_permission:admin.manage_backups')->group(function () {
         Route::get('backup/download', [BackupController::class, 'download']);
         Route::get('backup/tables', [BackupController::class, 'tables']);
         Route::post('backup/selective', [BackupController::class, 'downloadSelective']);
@@ -431,10 +491,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Settings ---
     Route::prefix('settings')->group(function () {
-        Route::get('/', SettingsHubController::class)->middleware('permission:manage_settings|manage_pricing|manage_agencies|manage_notifications|manage_statuses');
+        Route::get('/', SettingsHubController::class)->middleware('effective_permission_any:admin.manage_settings,admin.manage_pricing,admin.manage_agencies,admin.manage_notifications,admin.manage_statuses');
 
         // System-level settings: super_admin only (manage_settings)
-        Route::middleware('permission:manage_settings')->group(function () {
+        Route::middleware('effective_permission:admin.manage_settings')->group(function () {
             Route::get('app', [AppSettingController::class, 'edit']);
             Route::put('app', [AppSettingController::class, 'update']);
             Route::post('app/logo', [AppSettingController::class, 'uploadLogo']);
@@ -457,7 +517,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         // Operational settings: agency_admin + super_admin
-        Route::middleware('permission:manage_agencies')->group(function () {
+        Route::middleware('effective_permission:admin.manage_agencies')->group(function () {
             Route::get('agencies', [AgencyController::class, 'index']);
             Route::post('agencies', [AgencyController::class, 'store']);
             Route::patch('agencies/{agency}', [AgencyController::class, 'update']);
@@ -467,7 +527,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('agency-payment-coordinates/{agencyPaymentCoordinate}', [AgencyPaymentCoordinateController::class, 'destroy']);
         });
 
-        Route::middleware('permission:manage_pricing')->group(function () {
+        Route::middleware('effective_permission:admin.manage_pricing')->group(function () {
             Route::get('pricing-rules', [PricingRuleController::class, 'index']);
             Route::post('pricing-rules', [PricingRuleController::class, 'store']);
             Route::delete('pricing-rules/{pricingRule}', [PricingRuleController::class, 'destroy']);
@@ -516,29 +576,29 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::patch('ship-lines/{shipLine}', [ShipLineController::class, 'update']);
             Route::delete('ship-lines/{shipLine}', [ShipLineController::class, 'destroy']);
 
-            Route::get('exchange-rates', [\App\Http\Controllers\Settings\ExchangeRateController::class, 'index'])
-                ->middleware('permission:manage_exchange_rates');
-            Route::post('exchange-rates', [\App\Http\Controllers\Settings\ExchangeRateController::class, 'store'])
-                ->middleware('permission:manage_exchange_rates');
+            Route::get('exchange-rates', [ExchangeRateController::class, 'index'])
+                ->middleware('effective_permission:finance.manage_exchange_rates');
+            Route::post('exchange-rates', [ExchangeRateController::class, 'store'])
+                ->middleware('effective_permission:finance.manage_exchange_rates');
         });
 
-        Route::middleware('permission:manage_notifications')->group(function () {
+        Route::middleware('effective_permission:admin.manage_notifications')->group(function () {
             Route::get('notifications', [NotificationTemplateController::class, 'index']);
             Route::post('notifications', [NotificationTemplateController::class, 'store']);
             Route::patch('notifications/{notificationTemplate}', [NotificationTemplateController::class, 'update']);
         });
 
-        Route::middleware('permission:manage_assisted_purchases')->group(function () {
+        Route::middleware('effective_permission:assisted_purchase.manage')->group(function () {
             Route::get('merchants', [MerchantController::class, 'index']);
             Route::post('merchants', [MerchantController::class, 'store']);
             Route::patch('merchants/{merchant}', [MerchantController::class, 'update']);
             Route::delete('merchants/{merchant}', [MerchantController::class, 'destroy']);
         });
 
-        Route::middleware('permission:manage_settings')->group(function () {
-            Route::get('sync-errors', [\App\Http\Controllers\Settings\SyncErrorController::class, 'index']);
-            Route::post('sync-errors/{syncError}/retry', [\App\Http\Controllers\Settings\SyncErrorController::class, 'retry']);
-            Route::post('sync-errors/{syncError}/resolve', [\App\Http\Controllers\Settings\SyncErrorController::class, 'resolve']);
+        Route::middleware('effective_permission:admin.manage_settings')->group(function () {
+            Route::get('sync-errors', [SyncErrorController::class, 'index']);
+            Route::post('sync-errors/{syncError}/retry', [SyncErrorController::class, 'retry']);
+            Route::post('sync-errors/{syncError}/resolve', [SyncErrorController::class, 'resolve']);
 
             Route::get('pickup-failure-reasons', [PickupFailureReasonController::class, 'index']);
             Route::post('pickup-failure-reasons', [PickupFailureReasonController::class, 'store']);
@@ -546,14 +606,56 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('pickup-failure-reasons/{pickupFailureReason}', [PickupFailureReasonController::class, 'destroy']);
         });
 
-        Route::middleware('permission:manage_roles')->group(function () {
+        Route::middleware('effective_permission:rbac.manage_roles')->group(function () {
             Route::get('roles-permissions', [RolePermissionController::class, 'index']);
             Route::put('roles/{role}', [RolePermissionController::class, 'updateRole']);
             Route::post('roles', [RolePermissionController::class, 'storeRole']);
             Route::delete('roles/{role}', [RolePermissionController::class, 'destroyRole']);
-            Route::post('permissions', [RolePermissionController::class, 'storePermission']);
             Route::get('users/{user}/permissions', [RolePermissionController::class, 'userPermissions']);
             Route::put('users/{user}/permissions', [RolePermissionController::class, 'updateUserPermissions']);
+        });
+    });
+
+    // ─── Activity Log ────────────────────────
+    Route::get('activity-logs', [ActivityLogController::class, 'index'])
+        ->middleware('effective_permission:rbac.manage_users');
+
+    // ─── RBAC Administration ────────────────────────
+    Route::prefix('rbac')->group(function () {
+        Route::middleware('effective_permission:rbac.view_roles')->group(function () {
+            Route::get('roles', [RbacController::class, 'roles']);
+            Route::get('roles/{role}', [RbacController::class, 'showRole']);
+            Route::get('permissions', [RbacController::class, 'permissions']);
+            Route::get('permission-groups', [RbacController::class, 'permissionGroups']);
+        });
+
+        Route::middleware('effective_permission:rbac.manage_roles')->group(function () {
+            Route::post('roles', [RbacController::class, 'storeRole']);
+            Route::put('roles/{role}', [RbacController::class, 'updateRole']);
+            Route::delete('roles/{role}', [RbacController::class, 'destroyRole']);
+            Route::post('permission-groups', [RbacController::class, 'storePermissionGroup']);
+            Route::put('permission-groups/{permissionGroup}', [RbacController::class, 'updatePermissionGroup']);
+            Route::delete('permission-groups/{permissionGroup}', [RbacController::class, 'destroyPermissionGroup']);
+        });
+
+        Route::middleware('effective_permission:rbac.view_menus')->group(function () {
+            Route::get('menus', [RbacController::class, 'menus']);
+            Route::get('frontend-elements', [RbacController::class, 'frontendElements']);
+        });
+
+        Route::middleware('effective_permission:rbac.manage_menus')->group(function () {
+            Route::post('menus', [RbacController::class, 'storeMenu']);
+            Route::put('menus/{menu}', [RbacController::class, 'updateMenu']);
+            Route::post('frontend-elements', [RbacController::class, 'storeFrontendElement']);
+            Route::put('frontend-elements/{frontendElement}', [RbacController::class, 'updateFrontendElement']);
+        });
+
+        Route::middleware('effective_permission:rbac.manage_users')->group(function () {
+            Route::get('users', [RbacController::class, 'users']);
+            Route::put('users/{user}/role', [RbacController::class, 'assignRole']);
+            Route::post('users/{user}/activate', [RbacController::class, 'activateUser']);
+            Route::post('users/{user}/deactivate', [RbacController::class, 'deactivateUser']);
+            Route::post('users/{user}/reset-password', [RbacController::class, 'resetPassword']);
         });
     });
 });
@@ -563,17 +665,17 @@ Route::middleware('auth:sanctum')->group(function () {
 | Public routes (no auth)
 |--------------------------------------------------------------------------
 */
-Route::get('track/{trackingNumber}', [\App\Http\Controllers\TrackingController::class, 'apiTrack']);
-Route::post('track-events', [\App\Http\Controllers\TrackEventController::class, 'store'])->middleware('throttle:120,1');
-Route::post('webhooks/flexpay', [\App\Http\Controllers\WebhookController::class, 'flexpay']);
+Route::get('track/{trackingNumber}', [TrackingController::class, 'apiTrack']);
+Route::post('track-events', [TrackEventController::class, 'store'])->middleware('throttle:120,1');
+Route::post('webhooks/flexpay', [WebhookController::class, 'flexpay']);
 
 // §17 — Widget WordPress : endpoint public de suivi embeddable
-Route::get('widget/track/{trackingNumber}', [\App\Http\Controllers\TrackingController::class, 'widgetTrack']);
+Route::get('widget/track/{trackingNumber}', [TrackingController::class, 'widgetTrack']);
 
 // §17 — Formulaires WordPress publics (achat assisté + pré-alerte)
 Route::middleware('throttle:30,1')->group(function () {
-    Route::post('widget/assisted-purchase', [\App\Http\Controllers\WordPressFormController::class, 'createAssistedPurchase']);
-    Route::post('widget/pre-alert', [\App\Http\Controllers\WordPressFormController::class, 'createPreAlert']);
+    Route::post('widget/assisted-purchase', [WordPressFormController::class, 'createAssistedPurchase']);
+    Route::post('widget/pre-alert', [WordPressFormController::class, 'createPreAlert']);
 });
 
 // --- Quote Response (public, signed link) ---
