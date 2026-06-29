@@ -23,8 +23,8 @@ class UserResource extends JsonResource
         $base = [
             'uuid' => $this->uuid,
             'name' => $this->name,
-            'first_name' => $this->first_name,
-            'last_name' => $this->last_name,
+            'first_name' => $this->profile?->first_name,
+            'last_name' => $this->profile?->last_name,
             'email' => $this->email,
             'email_verified_at' => $this->email_verified_at,
             'theme_preference' => $this->theme_preference,

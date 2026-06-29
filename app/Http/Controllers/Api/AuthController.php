@@ -77,8 +77,6 @@ class AuthController extends Controller
             $newUser = User::create([
                 'profile_id' => $profile->id,
                 'name' => trim($validated['first_name'].' '.$validated['last_name']),
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
                 'email' => $validated['email'],
                 'phone' => $validated['phone'],
                 'password' => Hash::make($validated['password']),

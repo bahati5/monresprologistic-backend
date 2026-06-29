@@ -24,10 +24,11 @@ use App\Notifications\AssistedPurchaseOrderedNotification;
 use App\Notifications\QuoteReadyNotification;
 use App\Services\NotificationDispatcher;
 use App\Services\QuoteCalculationService;
+use App\Services\RbacService;
 use App\Services\QuoteFollowUpService;
 use App\Services\Scraping\ProductScraperService;
 use App\Services\Twilio\TwilioGateway;
-use App\Support\AssistedPurchaseUrlLabel;
+use App\Support\ClientInAppNotificationLinks;
 use App\Support\FrontendPortalUrl;
 use App\Support\QuoteSnapshotDataNormalizer;
 use App\Support\ShipmentDocumentSettings;
@@ -55,7 +56,9 @@ class AssistedPurchaseController extends Controller
             'items.merchant',
         ])->latest();
 
-        if ($user->hasRole('client')) {
+        // Comptes « portail client uniquement » : leurs dossiers seulement. Ne pas confondre avec un staff
+        // qui aurait aussi le rôle `client` (ex. super_admin de test) : sinon la liste serait vide.
+        if ($user->isPortalOnlyClient()) {
             $q->where('user_id', $user->id);
         } elseif (! $user->canAccessAllAgencies()) {
             $q->whereHas('user', fn ($u) => $u->where('agency_id', $user->agency_id));
@@ -104,7 +107,7 @@ class AssistedPurchaseController extends Controller
             $q->whereDate('created_at', '<=', $validated['date_to']);
         }
 
-        if (! $user->hasRole('client')) {
+        if (! $user->isPortalOnlyClient()) {
             if (! empty($validated['user_id'])) {
                 $q->where('user_id', (int) $validated['user_id']);
             }
@@ -990,9 +993,10 @@ class AssistedPurchaseController extends Controller
         $actionUrl = $base.'/purchase-orders/'.$assisted_purchase->id.'/chiffrage';
 
         $recipients = User::query()
-            ->permission('manage_assisted_purchases')
+            ->permission('assisted_purchase.manage')
             ->where(function ($w) use ($client) {
-                $w->where('can_view_all_agencies', true);
+                $w->whereHas('roles', fn ($q) => $q->where('name', 'super_admin'))
+                    ->orWhere('can_view_all_agencies', true);
                 if ($client->agency_id !== null) {
                     $w->orWhere('agency_id', (int) $client->agency_id);
                 }
@@ -1658,7 +1662,7 @@ class AssistedPurchaseController extends Controller
     protected function authorizeStaff(Request $request): void
     {
         abort_unless(
-            $request->user()->can('manage_assisted_purchases'),
+            RbacService::userHasPermission($request->user(), 'assisted_purchase.manage'),
             403
         );
     }
@@ -1786,7 +1790,7 @@ class AssistedPurchaseController extends Controller
                         'actual_kg' => $actualWeightKg,
                         'discrepancy_pct' => round($discrepancyPct, 1),
                     ],
-                    actionUrl: '/purchase-orders/'.$purchase->id,
+                    actionUrl: ClientInAppNotificationLinks::forUser($purchase->user, '/purchase-orders/'.$purchase->id),
                 );
             } catch (\Throwable) {
             }

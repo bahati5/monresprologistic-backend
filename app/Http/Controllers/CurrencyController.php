@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\CurrencyConverter;
+use App\Services\RbacService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,7 +18,7 @@ class CurrencyController extends Controller
         abort_if($user->hasRole('client'), 403);
         abort_unless(
             $user->can('manage_settings')
-                || $user->can('manage_assisted_purchases')
+                || RbacService::userHasPermission($user, 'assisted_purchase.manage')
                 || $user->can('manage_finances'),
             403
         );

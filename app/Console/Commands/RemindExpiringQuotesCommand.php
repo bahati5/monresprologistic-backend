@@ -6,6 +6,7 @@ use App\Enums\AssistedPurchaseStatus;
 use App\Models\AssistedPurchase;
 use App\Models\Setting;
 use App\Services\NotificationDispatcher;
+use App\Support\ClientInAppNotificationLinks;
 use Illuminate\Console\Command;
 
 /**
@@ -49,7 +50,7 @@ class RemindExpiringQuotesCommand extends Command
                     'client_nom' => $user->name ?? '',
                     'hours_left' => (string) $reminderBefore,
                 ],
-                actionUrl: "/purchase-orders/{$purchase->id}",
+                actionUrl: ClientInAppNotificationLinks::forUser($user, "/purchase-orders/{$purchase->id}"),
             );
 
             // Staff notification (agence du client — AssistedPurchase n'a pas de agency_id)

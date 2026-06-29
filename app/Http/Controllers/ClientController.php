@@ -223,11 +223,8 @@ class ClientController extends Controller
                 $portalUser = User::create([
                     'profile_id' => $profile->id,
                     'name' => $fullName,
-                    'first_name' => $data['first_name'],
-                    'last_name' => $data['last_name'],
                     'email' => $data['email'],
                     'phone' => $data['phone'],
-                    'phone_mobile' => $data['phone_secondary'] ?? null,
                     'password' => Hash::make($password),
                     'agency_id' => $agencyId,
                     'email_verified_at' => now(),
@@ -311,11 +308,8 @@ class ClientController extends Controller
             if ($client->user) {
                 $client->user->update([
                     'name' => trim($data['first_name'].' '.$data['last_name']),
-                    'first_name' => $data['first_name'],
-                    'last_name' => $data['last_name'],
                     'email' => $data['email'],
                     'phone' => $data['phone'],
-                    'phone_mobile' => $data['phone_secondary'] ?? null,
                     'agency_id' => $data['agency_id'] ?? $client->user->agency_id,
                 ]);
             }
@@ -368,11 +362,8 @@ class ClientController extends Controller
             $newUser = User::create([
                 'profile_id' => $client->id,
                 'name' => $client->full_name,
-                'first_name' => $client->first_name,
-                'last_name' => $client->last_name,
                 'email' => $data['email'],
                 'phone' => $client->phone,
-                'phone_mobile' => $client->phone_secondary,
                 'password' => Hash::make($password),
                 'agency_id' => $client->agency_id,
                 'email_verified_at' => now(),

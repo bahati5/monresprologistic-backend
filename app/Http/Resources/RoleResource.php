@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Spatie\Permission\Models\Permission;
 
 class RoleResource extends JsonResource
 {
@@ -21,7 +22,8 @@ class RoleResource extends JsonResource
                 $this->relationLoaded('permissionGroups'),
                 fn () => PermissionGroupResource::collection($this->permissionGroups),
             ),
-            'permissions_count' => $this->whenCounted('permissions'),
+            /** Compte direct Spatie ; pour super_admin sans pivot (base incomplète), on affiche le catalogue total. */
+            'permissions_count' => $this->permissionsCountForDisplay(),
             'users_count' => $this->whenCounted('users'),
             'groups_count' => $this->when(
                 $this->relationLoaded('permissionGroups'),
@@ -29,5 +31,19 @@ class RoleResource extends JsonResource
             ),
             'created_at' => $this->created_at,
         ];
+    }
+
+    private function permissionsCountForDisplay(): int
+    {
+        $role = $this->resource;
+
+        $direct = (int) ($role->permissions_count
+            ?? ($role->relationLoaded('permissions') ? $role->permissions->count() : 0));
+
+        if ($role->name === 'super_admin' && $direct === 0) {
+            return (int) Permission::query()->count();
+        }
+
+        return $direct;
     }
 }

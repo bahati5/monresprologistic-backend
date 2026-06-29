@@ -38,13 +38,13 @@ class ClarificationTest extends TestCase
         app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
         Permission::create([
-            'name' => 'manage_assisted_purchases',
+            'name' => 'assisted_purchase.manage',
             'guard_name' => 'web',
         ]);
 
         $roleClient = Role::create(['name' => 'client', 'guard_name' => 'web']);
         $roleOperator = Role::create(['name' => 'operator', 'guard_name' => 'web']);
-        $roleOperator->givePermissionTo('manage_assisted_purchases');
+        $roleOperator->givePermissionTo('assisted_purchase.manage');
 
         $this->agency = Agency::factory()->create();
 
@@ -59,7 +59,7 @@ class ClarificationTest extends TestCase
             'agency_id' => $this->agency->id,
         ]);
         $this->staff->assignRole($roleOperator);
-        $this->staff->givePermissionTo('manage_assisted_purchases');
+        $this->staff->givePermissionTo('assisted_purchase.manage');
     }
 
     protected function seedPurchase(): AssistedPurchase

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Notification;
+use App\Support\ClientInAppNotificationLinks;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,6 +17,15 @@ class NotificationController extends Controller
             ->inApp()
             ->orderByDesc('created_at')
             ->paginate(20);
+
+        $notifications = $notifications->through(function (Notification $n) use ($user) {
+            $n->setAttribute(
+                'action_href',
+                ClientInAppNotificationLinks::forUser($user, $n->action_url),
+            );
+
+            return $n;
+        });
 
         $unreadCount = Notification::forUser($user->id)
             ->inApp()

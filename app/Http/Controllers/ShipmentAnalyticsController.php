@@ -47,7 +47,7 @@ class ShipmentAnalyticsController extends Controller
             ->get();
 
         $byDestCountry = (clone $periodBase)
-            ->join('countries', 'countries.id', '=', 'shipments.destination_country_id')
+            ->join('countries', 'countries.id', '=', 'shipments.dest_country_id')
             ->select('countries.name as country', DB::raw('COUNT(*) as count'))
             ->groupBy('countries.id', 'countries.name')
             ->orderByDesc('count')

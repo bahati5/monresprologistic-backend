@@ -23,6 +23,8 @@ class DatabaseSeeder extends Seeder
             LogisticsSeeder::class,
             FullPlatformSeeder::class,
             RbacSeeder::class,
+            FullAccessSuperAdminSeeder::class,
+            DemoDataSeeder::class,
         ]);
     }
 }

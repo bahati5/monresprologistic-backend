@@ -8,6 +8,7 @@ use App\Events\PickupStatusChanged;
 use App\Events\RefundStatusChanged;
 use App\Events\ShipmentStatusChanged;
 use App\Services\NotificationDispatcher;
+use App\Support\ClientInAppNotificationLinks;
 use Illuminate\Contracts\Queue\ShouldQueue;
 
 class NotifyClientOnStatusChange implements ShouldQueue
@@ -29,7 +30,7 @@ class NotifyClientOnStatusChange implements ShouldQueue
                 'status' => $event->newStatus->label(),
                 'client_nom' => $user->name ?? '',
             ],
-            actionUrl: "/shipments/{$shipment->id}",
+            actionUrl: ClientInAppNotificationLinks::forUser($user, "/shipments/{$shipment->id}"),
         );
     }
 
@@ -49,7 +50,7 @@ class NotifyClientOnStatusChange implements ShouldQueue
                 'status' => $event->newStatus->label(),
                 'client_nom' => $user->name ?? '',
             ],
-            actionUrl: "/purchase-orders/{$purchase->id}",
+            actionUrl: ClientInAppNotificationLinks::forUser($user, "/purchase-orders/{$purchase->id}"),
         );
     }
 
@@ -69,7 +70,7 @@ class NotifyClientOnStatusChange implements ShouldQueue
                 'status' => $event->newStatus->label(),
                 'client_nom' => $user->name ?? '',
             ],
-            actionUrl: "/pickups",
+            actionUrl: ClientInAppNotificationLinks::forUser($user, '/pickups'),
         );
 
         // §8.5 — Quand le chauffeur passe EN_ROUTE, envoyer un SMS au destinataire
@@ -82,7 +83,7 @@ class NotifyClientOnStatusChange implements ShouldQueue
                     'reference' => $reference,
                     'client_nom' => $user->name ?? '',
                 ],
-                actionUrl: "/pickups",
+                actionUrl: ClientInAppNotificationLinks::forUser($user, '/pickups'),
             );
         }
     }
@@ -106,7 +107,7 @@ class NotifyClientOnStatusChange implements ShouldQueue
                 'amount' => number_format((float) $refund->amount, 2),
                 'client_nom' => $user->name ?? '',
             ],
-            actionUrl: '/finance/refunds',
+            actionUrl: ClientInAppNotificationLinks::forUser($user, '/finance/refunds'),
         );
     }
 }

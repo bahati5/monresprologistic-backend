@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AssistedPurchaseStatus;
 use App\Enums\ShipmentStatus;
 use App\Models\AssistedPurchase;
 use App\Models\CustomerPackage;
@@ -30,7 +31,7 @@ class DashboardController extends Controller
     {
         $user = $request->user();
 
-        if ($user->hasRole('driver')) {
+        if ($user->isFieldDriverOnly()) {
             $pickupsToday = Pickup::query()
                 ->where('assigned_driver_id', $user->id)
                 ->whereDate('created_at', today())
@@ -76,7 +77,7 @@ class DashboardController extends Controller
             ]);
         }
 
-        if ($user->hasRole('client')) {
+        if ($user->isPortalOnlyClient()) {
             $profileId = $user->profile_id;
             $shipments = Shipment::query()
                 ->where(function ($q) use ($user, $profileId) {
@@ -117,7 +118,9 @@ class DashboardController extends Controller
             ]);
         }
 
-        if ($user->hasRole('customs_agent')) {
+        // Ne pas court-circuiter le tableau de bord staff complet : un super_admin / agency_admin /
+        // operator qui cumule aussi customs_agent (ex. FullAccessSuperAdminSeeder) doit rester sur admin.
+        if ($user->hasRole('customs_agent') && ! $user->hasAnyRole(['super_admin', 'agency_admin', 'operator'])) {
             $customsShipments = Shipment::query()
                 ->where('status', ShipmentStatus::InTransit)
                 ->with(['senderProfile', 'recipientProfile'])
@@ -211,10 +214,13 @@ class DashboardController extends Controller
 
         $shipmentsInTransit = (clone $shipmentsStatsQ)->where('status', ShipmentStatus::InTransit)->count();
 
-        $assistedBase = AssistedPurchase::query()
-            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id));
+        $assistedBase = AssistedPurchase::query();
+        $this->scopeAssistedPurchasesForUser($assistedBase, $user);
         $assistedToday = (clone $assistedBase)->whereDate('created_at', today())->count();
-        $assistedQuotesPending = (clone $assistedBase)->where('status', 'pending')->count();
+        $assistedQuotesPending = (clone $assistedBase)->whereIn('status', [
+            AssistedPurchaseStatus::PENDING_QUOTE->value,
+            AssistedPurchaseStatus::AWAITING_CLIENT_INFO->value,
+        ])->count();
 
         $stats = [
             'shipments_total' => (clone $shipmentsStatsQ)->count(),
@@ -274,6 +280,18 @@ class DashboardController extends Controller
         }
 
         return $q;
+    }
+
+    /**
+     * Les achats assistés n'ont pas de colonne `agency_id` : on filtre via l'agence du client (`users.agency_id`).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\AssistedPurchase>  $query
+     */
+    protected function scopeAssistedPurchasesForUser(\Illuminate\Database\Eloquent\Builder $query, User $user): void
+    {
+        if (! $user->canAccessAllAgencies()) {
+            $query->whereHas('user', fn ($u) => $u->where('agency_id', $user->agency_id));
+        }
     }
 
     protected function trendPercent(float $current, float $previous): ?float
@@ -411,9 +429,12 @@ class DashboardController extends Controller
     {
         $dossiers = [];
 
-        $quotesToSend = AssistedPurchase::query()
-            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
-            ->where('status', 'pending')
+        $quotesToSend = AssistedPurchase::query();
+        $this->scopeAssistedPurchasesForUser($quotesToSend, $user);
+        $quotesToSend = $quotesToSend->whereIn('status', [
+            AssistedPurchaseStatus::PENDING_QUOTE->value,
+            AssistedPurchaseStatus::AWAITING_CLIENT_INFO->value,
+        ])
             ->with('user')
             ->orderBy('created_at')
             ->limit(5)
@@ -449,9 +470,9 @@ class DashboardController extends Controller
             ];
         }
 
-        $toConvert = AssistedPurchase::query()
-            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
-            ->where('status', 'at_hub')
+        $toConvert = AssistedPurchase::query();
+        $this->scopeAssistedPurchasesForUser($toConvert, $user);
+        $toConvert = $toConvert->where('status', AssistedPurchaseStatus::ARRIVED_AT_HUB->value)
             ->with('user')
             ->orderBy('updated_at')
             ->limit(5)
@@ -480,8 +501,8 @@ class DashboardController extends Controller
         $this->scopeShipmentsForUser($shipmentsQ, $user);
         $shipmentsQ->excludingDrafts();
 
-        $assistedBase = AssistedPurchase::query()
-            ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id));
+        $assistedBase = AssistedPurchase::query();
+        $this->scopeAssistedPurchasesForUser($assistedBase, $user);
 
         $savBase = SavTicket::query()
             ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id));
@@ -497,9 +518,16 @@ class DashboardController extends Controller
             ],
             'achat_assiste' => [
                 'received_today' => (clone $assistedBase)->whereDate('created_at', today())->count(),
-                'quotes_sent' => (clone $assistedBase)->whereIn('status', ['quote_sent', 'accepted', 'paid', 'ordered', 'at_hub', 'converted'])->where('created_at', '>=', $thisMonth)->count(),
-                'accepted_today' => (clone $assistedBase)->where('status', 'accepted')->whereDate('updated_at', today())->count(),
-                'pending_payment' => (clone $assistedBase)->where('status', 'accepted')->count(),
+                'quotes_sent' => (clone $assistedBase)->whereIn('status', [
+                    AssistedPurchaseStatus::QUOTED->value,
+                    AssistedPurchaseStatus::AWAITING_PAYMENT->value,
+                    AssistedPurchaseStatus::PAID->value,
+                    AssistedPurchaseStatus::ORDERED->value,
+                    AssistedPurchaseStatus::ARRIVED_AT_HUB->value,
+                    AssistedPurchaseStatus::CONVERTED_TO_SHIPMENT->value,
+                ])->where('created_at', '>=', $thisMonth)->count(),
+                'accepted_today' => (clone $assistedBase)->where('status', AssistedPurchaseStatus::AWAITING_PAYMENT->value)->whereDate('updated_at', today())->count(),
+                'pending_payment' => (clone $assistedBase)->where('status', AssistedPurchaseStatus::AWAITING_PAYMENT->value)->count(),
             ],
             'sav' => [
                 'open' => (clone $savBase)->whereIn('status', ['open', 'in_progress', 'waiting_client', 'escalated'])->count(),
@@ -585,14 +613,18 @@ class DashboardController extends Controller
 
     protected function buildHandoverSection(User $user): array
     {
+        // Pas de `having` sur alias de withCount : incompatible SQLite / certains modes SQL stricts.
         $colleagues = User::query()
             ->where('id', '!=', $user->id)
             ->whereHas('roles', fn ($q) => $q->whereIn('name', ['operator', 'agency_admin']))
             ->when(! $user->canAccessAllAgencies(), fn ($q) => $q->where('agency_id', $user->agency_id))
             ->withCount(['savTicketsAssigned as open_tickets_count' => fn ($q) => $q->whereIn('status', ['open', 'in_progress', 'waiting_client'])])
-            ->having('open_tickets_count', '>', 0)
-            ->limit(5)
-            ->get();
+            ->limit(50)
+            ->get()
+            ->filter(fn ($c) => (int) $c->open_tickets_count > 0)
+            ->sortByDesc('open_tickets_count')
+            ->take(5)
+            ->values();
 
         return $colleagues->map(fn ($c) => [
             'user_name' => $c->name,

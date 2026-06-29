@@ -39,7 +39,14 @@ class SuperAdminSeeder extends Seeder
             ]
         );
 
-        $user->assignRole('super_admin');
+        // Compte « direction » : vue globale (canAccessAllAgencies = isSuperAdmin), attributs alignés à chaque seed.
+        $user->forceFill([
+            'profile_id' => $profile->id,
+            'can_view_all_agencies' => true,
+        ])->save();
+
+        // Rôle unique avec toutes les permissions (RolesAndPermissionsSeeder).
+        $user->syncRoles(['super_admin']);
 
         $this->command?->info("Super admin prêt : {$email} (mot de passe défini par SEED_SUPER_ADMIN_PASSWORD ou valeur par défaut locale).");
     }

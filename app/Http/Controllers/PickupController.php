@@ -23,7 +23,7 @@ class PickupController extends Controller
         $q = Pickup::query()->with(['client', 'agency', 'driver', 'shipment']);
         $this->scopeByAgency($q, $user);
 
-        if ($user->hasRole('driver')) {
+        if ($user->isFieldDriverOnly()) {
             $q->where('assigned_driver_id', $user->id);
         } elseif ($request->boolean('assigned_to_me')) {
             $q->where('assigned_driver_id', $user->id);

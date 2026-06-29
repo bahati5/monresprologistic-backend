@@ -165,7 +165,7 @@ class SectionDashboardController extends Controller
             $q->where('agency_id', $user->agency_id);
         }
 
-        if ($user->hasRole('driver')) {
+        if ($user->isFieldDriverOnly()) {
             $q->where('assigned_driver_id', $user->id);
         }
 

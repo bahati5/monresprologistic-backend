@@ -230,11 +230,8 @@ class ShipmentWizardController extends Controller
                 $portalUser = User::create([
                     'profile_id' => $profile->id,
                     'name' => $fullName,
-                    'first_name' => $data['first_name'],
-                    'last_name' => $data['last_name'],
                     'email' => $data['email'],
                     'phone' => $data['phone'],
-                    'phone_mobile' => $data['phone_secondary'] ?? null,
                     'password' => Hash::make($data['password']),
                     'agency_id' => $authUser->agency_id,
                     'email_verified_at' => now(),
@@ -312,8 +309,6 @@ class ShipmentWizardController extends Controller
             $portalUser = User::create([
                 'profile_id' => $profile->id,
                 'name' => $profile->full_name,
-                'first_name' => $profile->first_name,
-                'last_name' => $profile->last_name,
                 'email' => $email,
                 'phone' => $profile->phone,
                 'password' => Hash::make($tempPassword),
@@ -543,11 +538,16 @@ class ShipmentWizardController extends Controller
      */
     public function clientName(Request $request, int $id): JsonResponse
     {
-        $user = User::find($id);
+        $user = User::query()->with('profile')->find($id);
         if ($user) {
+            $full = $user->profile?->full_name;
+            if ($full === null || $full === '') {
+                $full = trim(($user->profile?->first_name ?? '').' '.($user->profile?->last_name ?? '')) ?: $user->name;
+            }
+
             return response()->json([
                 'name' => $user->name,
-                'full_name' => trim(($user->first_name ?? '').' '.($user->last_name ?? '')) ?: $user->name,
+                'full_name' => $full,
             ]);
         }
 

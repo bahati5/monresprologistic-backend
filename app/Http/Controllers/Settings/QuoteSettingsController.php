@@ -21,6 +21,7 @@ class QuoteSettingsController extends Controller
         'quote_secondary_currency',
         'quote_secondary_currency_rate_mode',
         'quote_secondary_currency_rate',
+        'quote_scraped_price_to_primary_multiplier',
     ];
 
     private const FOLLOW_UP_KEYS = [
@@ -43,6 +44,7 @@ class QuoteSettingsController extends Controller
             'secondary_currency' => $settings['quote_secondary_currency'] ?? '',
             'rate_mode' => $settings['quote_secondary_currency_rate_mode'] ?? 'manual',
             'rate' => (float) ($settings['quote_secondary_currency_rate'] ?? 0),
+            'scraped_price_to_primary_multiplier' => (float) ($settings['quote_scraped_price_to_primary_multiplier'] ?? 1),
         ]);
     }
 
@@ -54,6 +56,7 @@ class QuoteSettingsController extends Controller
             'secondary_currency' => ['required_if:secondary_currency_enabled,true', 'string', 'size:3'],
             'rate_mode' => ['required_if:secondary_currency_enabled,true', 'string', 'in:manual,auto'],
             'rate' => ['required_if:rate_mode,manual', 'numeric', 'min:0.0001'],
+            'scraped_price_to_primary_multiplier' => ['nullable', 'numeric', 'min:0.000001', 'max:999999'],
         ]);
 
         Setting::setValue('quote_primary_currency', $data['primary_currency']);
@@ -61,6 +64,13 @@ class QuoteSettingsController extends Controller
         Setting::setValue('quote_secondary_currency', $data['secondary_currency'] ?? '');
         Setting::setValue('quote_secondary_currency_rate_mode', $data['rate_mode'] ?? 'manual');
         Setting::setValue('quote_secondary_currency_rate', (string) ($data['rate'] ?? 0));
+        $mult = isset($data['scraped_price_to_primary_multiplier']) && is_numeric($data['scraped_price_to_primary_multiplier'])
+            ? (float) $data['scraped_price_to_primary_multiplier']
+            : 1.0;
+        if (! is_finite($mult) || $mult <= 0) {
+            $mult = 1.0;
+        }
+        Setting::setValue('quote_scraped_price_to_primary_multiplier', (string) $mult);
 
         return response()->json(['message' => 'Paramètres devises mis à jour.']);
     }

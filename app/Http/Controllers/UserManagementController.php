@@ -31,6 +31,24 @@ class UserManagementController extends Controller
         return ['agency_admin', 'operator', 'driver', 'customs_agent'];
     }
 
+    /**
+     * Noms de rôles pour le filtre query `role=` (un seul rôle ou plusieurs séparés par virgule ou |).
+     * Ne pas passer la chaîne brute à Spatie {@see User::scopeRole} : une valeur « a,b » est interprétée
+     * comme un seul nom de rôle inexistant et provoque une exception.
+     *
+     * @return list<string>
+     */
+    private static function roleFilterNames(mixed $value): array
+    {
+        if (is_array($value)) {
+            $raw = $value;
+        } else {
+            $raw = preg_split('/\s*[,|]\s*/', (string) $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+
+        return array_values(array_unique(array_filter(array_map('trim', $raw), fn (string $n) => $n !== '')));
+    }
+
     private function authorizeManagedUser(User $actor, User $target): void
     {
         if (! $target->hasAnyRole(self::STAFF_ROLE_NAMES)) {
@@ -62,7 +80,10 @@ class UserManagementController extends Controller
         }
 
         if ($request->filled('role')) {
-            $query->role($request->input('role'));
+            $names = self::roleFilterNames($request->input('role'));
+            if ($names !== []) {
+                $query->whereHas('roles', fn ($q) => $q->whereIn('name', $names));
+            }
         }
 
         if ($request->filled('agency_uuid')) {

@@ -7,6 +7,8 @@ use App\Models\Agency;
 use App\Models\AssistedPurchase;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 class QuoteDashboardTest extends TestCase
@@ -21,9 +23,14 @@ class QuoteDashboardTest extends TestCase
     {
         parent::setUp();
 
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+        Permission::query()->firstOrCreate(
+            ['name' => 'assisted_purchase.manage', 'guard_name' => 'web'],
+        );
+
         $this->agency = Agency::factory()->create();
         $this->staff = User::factory()->create(['agency_id' => $this->agency->id]);
-        $this->staff->givePermissionTo('manage_assisted_purchases');
+        $this->staff->givePermissionTo('assisted_purchase.manage');
     }
 
     public function test_can_get_dashboard_metrics(): void

@@ -23,6 +23,7 @@ use App\Models\User;
 use App\Services\PricingEngine;
 use App\Services\NotificationDispatcher;
 use App\Services\ShipmentWorkflowService;
+use App\Support\ClientInAppNotificationLinks;
 use App\Support\ShipmentDocumentSettings;
 use App\Support\ShipmentInvoiceNumberGenerator;
 use App\Support\ShipmentRowPresenter;
@@ -65,6 +66,17 @@ class ShipmentController extends Controller
             $q->orderByDesc('created_at');
         }
         $this->scopeShipmentsForUser($q, $user);
+
+        if ($request->filled('user_id') && ! $user->hasRole('client')) {
+            $clientUserId = (int) $request->input('user_id');
+            if ($clientUserId > 0) {
+                $q->where(function ($w) use ($clientUserId) {
+                    $w->where('creator_user_id', $clientUserId)
+                        ->orWhereHas('senderProfile.user', fn ($u) => $u->whereKey($clientUserId))
+                        ->orWhereHas('recipientProfile.user', fn ($u) => $u->whereKey($clientUserId));
+                });
+            }
+        }
 
         if ($request->filled('search')) {
             $term = '%'.$request->string('search').'%';
@@ -1155,7 +1167,7 @@ class ShipmentController extends Controller
                     'tracking' => $shipment->public_tracking ?? '',
                     'client_nom' => $owner->name ?? '',
                 ],
-                actionUrl: "/shipments/{$shipment->id}",
+                actionUrl: ClientInAppNotificationLinks::forUser($owner, "/shipments/{$shipment->id}"),
             );
         }
 

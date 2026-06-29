@@ -9,6 +9,7 @@ use App\Models\CustomerPackage;
 use App\Models\Invoice;
 use App\Models\Shipment;
 use App\Models\Setting;
+use App\Support\ClientInAppNotificationLinks;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -143,7 +144,7 @@ class ClientPortalController extends Controller
                 'severity' => 'warning',
                 'title' => 'Devis en attente de votre réponse',
                 'message' => 'Un devis vous attend. ' . ($expiresAt ? 'Expire le ' . $expiresAt->format('d/m/Y à H:i') . '.' : ''),
-                'action_url' => "/purchase-orders/{$purchase->id}",
+                'action_url' => ClientInAppNotificationLinks::clientSpaFromInternalPath("/purchase-orders/{$purchase->id}"),
                 'action_label' => 'Voir le devis',
             ];
         }
@@ -159,7 +160,7 @@ class ClientPortalController extends Controller
                 'severity' => 'info',
                 'title' => "{$awaitingPayment} paiement(s) à effectuer",
                 'message' => 'Des achats assistés attendent votre preuve de paiement.',
-                'action_url' => '/purchase-orders',
+                'action_url' => ClientInAppNotificationLinks::clientSpaFromInternalPath('/purchase-orders'),
                 'action_label' => 'Mes achats',
             ];
         }

@@ -12,6 +12,10 @@ class RbacService
             return false;
         }
 
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
         return in_array($permCode, $user->getAllEffectivePermissionCodes(), true);
     }
 
@@ -19,6 +23,10 @@ class RbacService
     {
         if (! $user) {
             return false;
+        }
+
+        if ($user->isSuperAdmin()) {
+            return true;
         }
 
         $effective = $user->getAllEffectivePermissionCodes();
@@ -36,6 +44,10 @@ class RbacService
     {
         if (! $user) {
             return false;
+        }
+
+        if ($user->isSuperAdmin()) {
+            return true;
         }
 
         $effective = $user->getAllEffectivePermissionCodes();

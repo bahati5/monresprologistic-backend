@@ -59,13 +59,6 @@ class ProfileController extends Controller
                 'theme_preference' => $data['theme_preference'] ?? $user->theme_preference,
             ]);
 
-            if (array_key_exists('first_name', $data)) {
-                $user->first_name = $data['first_name'];
-            }
-            if (array_key_exists('last_name', $data)) {
-                $user->last_name = $data['last_name'];
-            }
-
             if ($user->isDirty('email')) {
                 $user->email_verified_at = null;
             }

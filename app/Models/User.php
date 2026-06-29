@@ -30,8 +30,6 @@ class User extends Authenticatable
     protected $fillable = [
         'profile_id',
         'name',
-        'first_name',
-        'last_name',
         'email',
         'phone',
         'password',
@@ -212,13 +210,49 @@ class User extends Authenticatable
         return $this->hasRole('super_admin');
     }
 
+    /**
+     * Périmètre multi-agences : tout super_admin voit toutes les agences (aucune restriction par agence).
+     * Le champ {@see $can_view_all_agencies} reste en base pour l’UI / cohérence des données, mais n’ouvre plus l’accès :
+     * seul le rôle compte.
+     */
     public function canAccessAllAgencies(): bool
     {
-        return $this->isSuperAdmin() && $this->can_view_all_agencies;
+        return $this->isSuperAdmin();
     }
 
     public function hasPermissionName(string $permission): bool
     {
         return $this->can($permission);
+    }
+
+    /**
+     * Rôles qui ouvrent l’application staff complète (prioritaires sur client / chauffeur).
+     *
+     * @return list<string>
+     */
+    public static function internalStaffRoleNames(): array
+    {
+        return ['super_admin', 'agency_admin', 'operator', 'customs_agent'];
+    }
+
+    public function hasInternalStaffAppRole(): bool
+    {
+        return $this->hasAnyRole(self::internalStaffRoleNames());
+    }
+
+    /**
+     * Compte limité au portail client (pas un staff qui cumule le rôle client).
+     */
+    public function isPortalOnlyClient(): bool
+    {
+        return $this->hasRole('client') && ! $this->hasInternalStaffAppRole();
+    }
+
+    /**
+     * Chauffeur terrain sans rôle staff (dashboard / liste ramassages chauffeur).
+     */
+    public function isFieldDriverOnly(): bool
+    {
+        return $this->hasRole('driver') && ! $this->hasInternalStaffAppRole();
     }
 }

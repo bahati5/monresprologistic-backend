@@ -21,6 +21,20 @@ use Spatie\Permission\PermissionRegistrar;
 
 class RbacController extends Controller
 {
+    /**
+     * @return list<string>
+     */
+    private static function roleFilterNames(mixed $value): array
+    {
+        if (is_array($value)) {
+            $raw = $value;
+        } else {
+            $raw = preg_split('/\s*[,|]\s*/', (string) $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+
+        return array_values(array_unique(array_filter(array_map('trim', $raw), fn (string $n) => $n !== '')));
+    }
+
     // ─── Roles ──────────────────────────────────────
 
     public function roles(): JsonResponse
@@ -359,7 +373,12 @@ class RbacController extends Controller
                 $sub->where('name', 'like', $like)
                     ->orWhere('email', 'like', $like);
             }))
-            ->when($request->filled('role'), fn ($q) => $q->role($request->role))
+            ->when($request->filled('role'), function ($q) use ($request) {
+                $names = self::roleFilterNames($request->input('role'));
+                if ($names !== []) {
+                    $q->whereHas('roles', fn ($sub) => $sub->whereIn('name', $names));
+                }
+            })
             ->when($request->filled('agency_id'), fn ($q) => $q->where('agency_id', $request->agency_id))
             ->orderByDesc('created_at');
 

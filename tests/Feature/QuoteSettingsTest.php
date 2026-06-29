@@ -7,6 +7,7 @@ use App\Models\QuoteEmailTemplate;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 class QuoteSettingsTest extends TestCase
@@ -23,7 +24,10 @@ class QuoteSettingsTest extends TestCase
 
         $this->agency = Agency::factory()->create();
         $this->staff = User::factory()->create(['agency_id' => $this->agency->id]);
-        $this->staff->givePermissionTo('manage_assisted_purchases');
+        Permission::query()->firstOrCreate(
+            ['name' => 'assisted_purchase.manage', 'guard_name' => 'web'],
+        );
+        $this->staff->givePermissionTo('assisted_purchase.manage');
     }
 
     public function test_can_read_currency_settings(): void
@@ -38,7 +42,8 @@ class QuoteSettingsTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('primary_currency', 'USD')
             ->assertJsonPath('secondary_currency_enabled', true)
-            ->assertJsonPath('rate', 2800.0);
+            ->assertJsonPath('rate', 2800)
+            ->assertJsonPath('scraped_price_to_primary_multiplier', 1);
     }
 
     public function test_can_update_currency_settings(): void
@@ -49,11 +54,13 @@ class QuoteSettingsTest extends TestCase
             'secondary_currency' => 'CDF',
             'rate_mode' => 'manual',
             'rate' => 3200,
+            'scraped_price_to_primary_multiplier' => 1.15,
         ]);
 
         $response->assertOk();
         $this->assertEquals('EUR', Setting::getValue('quote_primary_currency'));
         $this->assertEquals('3200', Setting::getValue('quote_secondary_currency_rate'));
+        $this->assertEquals('1.15', Setting::getValue('quote_scraped_price_to_primary_multiplier'));
     }
 
     public function test_can_read_follow_up_settings(): void
@@ -108,7 +115,7 @@ class QuoteSettingsTest extends TestCase
             'is_active' => true,
         ]);
 
-        $response = $this->actingAs($this->staff)->patchJson("/api/settings/quote-email-templates/{$template->id}", [
+        $response = $this->actingAs($this->staff)->patchJson("/api/settings/quote-email-templates/{$template->uuid}", [
             'subject' => 'New subject',
             'body' => 'New body with {{client_name}}',
         ]);

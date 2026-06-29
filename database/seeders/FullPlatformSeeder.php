@@ -808,6 +808,8 @@ class FullPlatformSeeder extends Seeder
         //                 calculation_base: product_price|subtotal_after_commission (nullable)
         //                 applies_to: all|assisted_purchase|shipment
         //                 behavior: mandatory|optional|optional_included
+        // is_mandatory: si true → cadenas UI, ligne non supprimable. Les 3 lignes « cœur » restent
+        // chargées par défaut (behavior mandatory) mais l’opérateur peut les retirer du devis.
         $templates = [
             [
                 'internal_code' => 'PRODUCT_COST',
@@ -816,7 +818,7 @@ class FullPlatformSeeder extends Seeder
                 'type' => 'manual',
                 'calculation_base' => null,
                 'default_value' => 0,
-                'is_mandatory' => true,
+                'is_mandatory' => false,
                 'is_visible_to_client' => true,
                 'display_order' => 1,
                 'applies_to' => 'all',
@@ -829,7 +831,7 @@ class FullPlatformSeeder extends Seeder
                 'type' => 'percentage',
                 'calculation_base' => 'product_price',
                 'default_value' => 7.00,
-                'is_mandatory' => true,
+                'is_mandatory' => false,
                 'is_visible_to_client' => true,
                 'display_order' => 2,
                 'applies_to' => 'assisted_purchase',
@@ -842,7 +844,7 @@ class FullPlatformSeeder extends Seeder
                 'type' => 'fixed_amount',
                 'calculation_base' => null,
                 'default_value' => 15.00,
-                'is_mandatory' => true,
+                'is_mandatory' => false,
                 'is_visible_to_client' => true,
                 'display_order' => 3,
                 'applies_to' => 'all',
