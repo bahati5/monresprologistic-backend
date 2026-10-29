@@ -95,8 +95,8 @@ class TwilioConfigController extends Controller
         }
 
         $body = $channel === 'whatsapp'
-            ? 'MonResPro — test WhatsApp depuis les paramètres.'
-            : 'MonResPro — test SMS depuis les paramètres.';
+            ? 'Kotinda — test WhatsApp depuis les paramètres.'
+            : 'Kotinda — test SMS depuis les paramètres.';
 
         try {
             if ($channel === 'whatsapp') {

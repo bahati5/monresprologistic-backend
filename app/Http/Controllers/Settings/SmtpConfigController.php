@@ -67,17 +67,17 @@ class SmtpConfigController extends Controller
             ], 422);
         }
 
-        config(['mail.mailers._monrespro_smtp_test' => $mailerConfig]);
+        config(['mail.mailers._kotinda_smtp_test' => $mailerConfig]);
 
         $fromEmail = trim((string) Setting::getValue('smtp_from_email', ''));
         $fromName = trim((string) Setting::getValue('smtp_from_name', ''));
 
         try {
-            Mail::mailer('_monrespro_smtp_test')->raw(
-                "Ceci est un e-mail de test envoyé depuis les paramètres MonResPro.\n\n".now()->toIso8601String(),
+            Mail::mailer('_kotinda_smtp_test')->raw(
+                "Ceci est un e-mail de test envoyé depuis les paramètres Kotinda.\n\n".now()->toIso8601String(),
                 function ($message) use ($validated, $fromEmail, $fromName) {
                     $message->to($validated['to'])
-                        ->subject('MonResPro — test SMTP');
+                        ->subject('Kotinda — test SMTP');
                     if ($fromEmail !== '') {
                         $message->from($fromEmail, $fromName !== '' ? $fromName : $fromEmail);
                     }

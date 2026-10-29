@@ -44,7 +44,7 @@ class FlexPayService
                 'phone' => $data['phone'],
                 'reference' => $data['reference'],
                 'amount' => $data['amount'],
-                'currency' => $data['currency'] ?? 'CDF',
+                'currency' => $data['currency'] ?? 'XAF',
                 'callbackUrl' => $data['callback_url'] ?? config('app.url') . '/api/webhooks/flexpay',
             ];
 

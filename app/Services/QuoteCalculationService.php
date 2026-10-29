@@ -163,10 +163,10 @@ class QuoteCalculationService
         ])->pluck('value', 'key');
 
         return [
-            'primary' => $settings['quote_primary_currency'] ?? 'USD',
+            'primary' => $settings['quote_primary_currency'] ?? 'XAF',
             'enabled' => (bool) ($settings['quote_secondary_currency_enabled'] ?? false),
-            'secondary' => $settings['quote_secondary_currency'] ?? 'CDF',
-            'rate' => (float) ($settings['quote_secondary_currency_rate'] ?? 2800),
+            'secondary' => $settings['quote_secondary_currency'] ?? 'EUR',
+            'rate' => (float) ($settings['quote_secondary_currency_rate'] ?? 0.001524),
         ];
     }
 }

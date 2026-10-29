@@ -1,15 +1,15 @@
 /**
- * Monrespro Tracking Widget
+ * Kotinda Tracking Widget
  * Usage: embed on any site with:
- *   <div id="monrespro-tracking"></div>
- *   <script src="https://your-domain.com/widgets/monrespro-tracking.js" data-api="https://your-domain.com"></script>
+ *   <div id="kotinda-tracking"></div>
+ *   <script src="https://your-domain.com/widgets/kotinda-tracking.js" data-api="https://your-domain.com"></script>
  *
- * WordPress shortcode: [monrespro_tracking]
+ * WordPress shortcode: [kotinda_tracking]
  */
 (function () {
   var script = document.currentScript;
   var apiBase = (script && script.getAttribute('data-api')) || '';
-  var container = document.getElementById('monrespro-tracking');
+  var container = document.getElementById('kotinda-tracking');
 
   if (!container) return;
 

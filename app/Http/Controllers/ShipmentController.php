@@ -228,7 +228,7 @@ class ShipmentController extends Controller
 
         $drivers = $this->getDriversForUser($user);
 
-        $trackingPrefix = Setting::getValue('tracking_prefix', 'MRP');
+        $trackingPrefix = Setting::getValue('tracking_prefix', 'KTD');
         $trackingNumberDigits = max(4, min(32, (int) (Setting::getValue('tracking_number_length', '8') ?: 8)));
         $volumetricDivisor = max(1.0, (float) (Setting::getValue('volumetric_divisor', '5000') ?: 5000));
 
@@ -313,7 +313,7 @@ class ShipmentController extends Controller
         $payload = array_merge($data, ['agency_id' => $agencyId]);
         $pricing = $this->computeWizardPricing($payload, $user, $agencyId);
         $snap = $pricing['pricing_snapshot'];
-        $currencyCode = (string) (Setting::getValue('currency', 'EUR') ?: 'EUR');
+        $currencyCode = (string) (Setting::getValue('currency', 'XAF') ?: 'XAF');
 
         return response()->json([
             'base_quote' => $snap['base_quote'],
@@ -457,11 +457,11 @@ class ShipmentController extends Controller
                 'weight_kg' => $realWeight ?: null,
                 'volumetric_weight_kg' => $volWeight ?: null,
                 'declared_value' => $declaredValue ?: null,
-                'declared_currency' => $data['declared_currency'] ?? 'USD',
+                'declared_currency' => $data['declared_currency'] ?? 'XAF',
                 'service_options' => $serviceOptions,
                 'pricing_snapshot' => $pricingSnapshot,
                 'calculated_price' => $finalTotal,
-                'currency' => 'USD',
+                'currency' => 'XAF',
             ]);
 
             foreach ($data['items'] as $item) {
@@ -610,7 +610,7 @@ class ShipmentController extends Controller
                 'weight_kg' => $realWeight ?: null,
                 'volumetric_weight_kg' => $volWeight ?: null,
                 'declared_value' => $declaredValue ?: null,
-                'declared_currency' => $data['declared_currency'] ?? $shipment->declared_currency ?? 'USD',
+                'declared_currency' => $data['declared_currency'] ?? $shipment->declared_currency ?? 'XAF',
                 'service_options' => $serviceOptions,
                 'pricing_snapshot' => $pricingSnapshot,
                 'calculated_price' => $finalTotal,
@@ -729,7 +729,7 @@ class ShipmentController extends Controller
             'service_options' => $so,
             'items' => $items,
             'declared_value' => $shipment->declared_value,
-            'declared_currency' => $shipment->declared_currency ?? 'USD',
+            'declared_currency' => $shipment->declared_currency ?? 'XAF',
             'insurance_pct' => (float) ($snap['insurance_pct'] ?? $snap['insurance_percentage'] ?? 0),
             'customs_duty_pct' => (float) ($snap['customs_duty_pct'] ?? $snap['customs_duty_percentage'] ?? 0),
             'tax_pct' => (float) ($snap['tax_pct'] ?? $snap['tax_percentage'] ?? 0),
@@ -794,11 +794,11 @@ class ShipmentController extends Controller
                 'volumetric_weight_kg' => $volWeight ?: null,
                 'declared_value' => $declaredValue ?: null,
                 'company_coverage_amount' => $shipment->company_coverage_amount,
-                'declared_currency' => $data['declared_currency'] ?? 'USD',
+                'declared_currency' => $data['declared_currency'] ?? 'XAF',
                 'service_options' => $serviceOptions,
                 'pricing_snapshot' => $pricingSnapshot,
                 'calculated_price' => $finalTotal,
-                'currency' => $shipment->currency ?? 'USD',
+                'currency' => $shipment->currency ?? 'XAF',
                 'signed_form_path' => null,
                 'delivery_signature' => null,
                 'delivery_notes' => null,
@@ -927,7 +927,7 @@ class ShipmentController extends Controller
             'available_transitions' => $availableTransitions,
             'drivers' => $drivers,
             'doc_settings' => [
-                'site_name' => $doc['site_name'] ?? 'Monrespro',
+                'site_name' => $doc['site_name'] ?? 'Kotinda',
                 'site_email' => $doc['site_email'] ?? '',
                 'phone' => $doc['phone'] ?? '',
                 'address' => $doc['address'] ?? '',
@@ -1252,7 +1252,7 @@ class ShipmentController extends Controller
             $shipment->logs()->create([
                 'user_id' => $request->user()->id,
                 'status' => $shipment->status,
-                'title' => 'Paiement enregistré : '.number_format($newAmount, 2).' '.($shipment->currency ?? 'USD').' ('.$label.')',
+                'title' => 'Paiement enregistré : '.number_format($newAmount, 2).' '.($shipment->currency ?? 'XAF').' ('.$label.')',
                 'description' => $data['notes'] ?? null,
                 'ip_address' => $request->ip(),
             ]);

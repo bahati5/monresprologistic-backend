@@ -16,7 +16,7 @@ final class LockerNumberGenerator
             $format = '{prefix}-{randnum}';
         }
 
-        $prefix = trim((string) (Setting::getValue('locker_prefix', 'MRP') ?? 'MRP')) ?: 'MRP';
+        $prefix = trim((string) (Setting::getValue('locker_prefix', 'KTD') ?? 'KTD')) ?: 'KTD';
         $digits = max(2, min(10, (int) (Setting::getValue('locker_digits', '4') ?: 4)));
         $mode = Setting::getValue('locker_mode', 'random') === 'sequential' ? 'sequential' : 'random';
         $seqPad = max(1, min(12, (int) (Setting::getValue('locker_seq_pad', '') ?: $digits)));

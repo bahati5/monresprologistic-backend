@@ -296,11 +296,11 @@ class ShipmentWizardController extends Controller
 
         $email = $profile->email;
         if (! $email || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $email = 'client-' . $profile->id . '@portal.monrespro.local';
+            $email = 'client-' . $profile->id . '@portal.kotinda.local';
         }
 
         if (User::where('email', $email)->exists()) {
-            $email = 'client-' . $profile->id . '-' . now()->timestamp . '@portal.monrespro.local';
+            $email = 'client-' . $profile->id . '-' . now()->timestamp . '@portal.kotinda.local';
         }
 
         $portalUser = null;

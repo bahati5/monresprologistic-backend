@@ -461,6 +461,7 @@ class AssistedPurchaseController extends Controller
                 'EUR' => '€',
                 'USD' => '$',
                 'GBP' => '£',
+                'XAF' => 'FCFA',
                 default => $currency,
             };
         }
@@ -1134,16 +1135,16 @@ class AssistedPurchaseController extends Controller
         }
 
         $total = number_format((float) ($purchase->total_amount ?? 0), 2, '.', ' ');
-        $currency = $purchase->quote_currency ?? 'USD';
-        $ref = 'MRP-AA-'.str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
+        $currency = $purchase->quote_currency ?? 'XAF';
+        $ref = 'KTD-AA-'.str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
         $expiresAt = $purchase->quote_expires_at
             ? $purchase->quote_expires_at->format('d/m')
             : '';
 
-        $baseUrl = config('app.frontend_url', 'https://monrespro.cd');
-        $shortLink = $baseUrl.'/d/'.str_replace('MRP-AA-', 'AA', $ref);
+        $baseUrl = config('app.frontend_url', 'https://kotinda.ga');
+        $shortLink = $baseUrl.'/d/'.str_replace('KTD-AA-', 'AA', $ref);
 
-        $message = "Monrespro: Votre devis {$ref} est pret. "
+        $message = "Kotinda: Votre devis {$ref} est pret. "
             ."Total: {$total} {$currency}."
             .($expiresAt ? " Valable jusqu'au {$expiresAt}." : '')
             ." Consultez: {$shortLink}";
@@ -1281,7 +1282,7 @@ class AssistedPurchaseController extends Controller
 
         $clientProfile = $freshClient->profile;
         $shipment = DB::transaction(function () use ($request, $assisted_purchase, $agency, $clientProfile) {
-            // Agency is the sender (Monrespro ships the goods)
+            // Agency is the sender (Kotinda ships the goods)
             $agencyProfile = $this->ensureAgencyProfile($agency);
 
             // Client is the recipient
@@ -1525,7 +1526,7 @@ class AssistedPurchaseController extends Controller
     }
 
     /**
-     * Agence expéditrice (profil expéditeur Monrespro) pour la conversion en expédition.
+     * Agence expéditrice (profil expéditeur Kotinda) pour la conversion en expédition.
      * Ordre : `agency_id` (corps, si autorisé), client.user, client.profile, opérateur, puis repli contrôlé.
      */
     protected function resolveAgencyForAssistedPurchaseConversion(Request $request, User $client): Agency
@@ -2237,7 +2238,7 @@ class AssistedPurchaseController extends Controller
     ): void {
         $itemLabel = $item->name ?? $item->display_label ?? "Article #{$item->id}";
         $resolution = $data['resolution'];
-        $ref = 'MRP-AA-'.str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
+        $ref = 'KTD-AA-'.str_pad((string) $purchase->id, 4, '0', STR_PAD_LEFT);
 
         $resolutionMessages = [
             'wait_restock' => 'Nous attendons le réapprovisionnement.'
@@ -2253,10 +2254,10 @@ class AssistedPurchaseController extends Controller
             .($resolutionMessages[$resolution] ?? '')
             ."\n\n"
             .($data['staff_note'] ?? '')
-            ."\n\nConnectez-vous sur votre espace Monrespro pour plus de détails.\n\n"
-            ."L'équipe Monrespro";
+            ."\n\nConnectez-vous sur votre espace Kotinda pour plus de détails.\n\n"
+            ."L'équipe Kotinda";
 
-        $subject = "Monrespro — Article indisponible — {$ref}";
+        $subject = "Kotinda — Article indisponible — {$ref}";
 
         try {
             Mail::raw($body, function ($m) use ($client, $subject) {

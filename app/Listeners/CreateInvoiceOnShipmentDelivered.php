@@ -38,7 +38,7 @@ class CreateInvoiceOnShipmentDelivered
             return;
         }
 
-        $currency = $shipment->currency ?? $shipment->declared_currency ?? 'USD';
+        $currency = $shipment->currency ?? $shipment->declared_currency ?? 'XAF';
 
         try {
             DB::transaction(function () use ($shipment, $amount, $currency, $billUserId) {

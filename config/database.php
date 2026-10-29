@@ -83,7 +83,7 @@ return [
             'collation' => env('DB_COLLATION', 'utf8mb4_unicode_ci'),
             'prefix' => '',
             'prefix_indexes' => true,
-            'strict' => true,
+            'strict' => env('DB_STRICT', true),
             'engine' => null,
             'options' => $pdoMysqlDriverOptions(),
         ],

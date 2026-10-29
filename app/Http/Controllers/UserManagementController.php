@@ -17,7 +17,7 @@ class UserManagementController extends Controller
 {
     use Concerns\InteractsWithAgencyVisibility;
 
-    private const STAFF_ROLE_NAMES = ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent'];
+    private const STAFF_ROLE_NAMES = ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent', 'sav_agent', 'accountant'];
 
     /**
      * @return list<string>
@@ -25,10 +25,10 @@ class UserManagementController extends Controller
     private function assignableRoleNames(User $actor): array
     {
         if ($actor->hasRole('super_admin')) {
-            return ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent'];
+            return ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent', 'sav_agent', 'accountant'];
         }
 
-        return ['agency_admin', 'operator', 'driver', 'customs_agent'];
+        return ['agency_admin', 'operator', 'driver', 'customs_agent', 'sav_agent', 'accountant'];
     }
 
     /**

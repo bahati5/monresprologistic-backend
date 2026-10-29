@@ -19,7 +19,7 @@ class ShipmentDocumentSettings
         $logoUrl = $logoPath ? self::publicStorageUrl($logoPath) : null;
 
         return array_merge($cfg, [
-            'site_name' => Setting::getValue('site_name', $cfg['defaults']['site_name'] ?? 'Monrespro'),
+            'site_name' => Setting::getValue('site_name', $cfg['defaults']['site_name'] ?? 'Kotinda'),
             'site_email' => Setting::getValue('site_email', ''),
             'nit' => Setting::getValue('nit', ''),
             'phone' => $phone ?? '',
@@ -27,8 +27,8 @@ class ShipmentDocumentSettings
             'country' => Setting::getValue('country', ''),
             'city' => Setting::getValue('city', ''),
             'zip_code' => Setting::getValue('zip_code', ''),
-            'currency' => Setting::getValue('currency', 'EUR'),
-            'currency_symbol' => Setting::getValue('currency_symbol', '€'),
+            'currency' => Setting::getValue('currency', 'XAF'),
+            'currency_symbol' => Setting::getValue('currency_symbol', 'FCFA'),
             'logo_url' => $logoUrl,
             'logo_data_uri' => $logoDataUri,
             'logo_thumb_w' => $cfg['logo_thumb']['w'] ?? 120,

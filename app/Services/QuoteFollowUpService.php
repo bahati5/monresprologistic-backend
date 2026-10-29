@@ -206,7 +206,7 @@ class QuoteFollowUpService
         }
 
         if (in_array('email', $channels) && $user->email) {
-            $subject = config('app.name', 'Monrespro') . ' — Précisions requises pour votre demande #' . $purchase->id;
+            $subject = config('app.name', 'Kotinda') . ' — Précisions requises pour votre demande #' . $purchase->id;
             \Illuminate\Support\Facades\Mail::raw($message, function ($m) use ($user, $subject) {
                 $m->to($user->email)->subject($subject);
             });

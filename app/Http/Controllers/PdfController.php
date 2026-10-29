@@ -597,7 +597,7 @@ class PdfController extends Controller
                 'bankFeePercentageLabel' => '3.5%',
                 'bankFeeFormatted' => $fmt($bankFee),
                 'totalFormatted' => $fmt($total),
-                'totalCdfFormatted' => null,
+                'totalXafFormatted' => null,
                 'paymentMethodsNote' => null,
                 'paymentUrl' => null,
             ],

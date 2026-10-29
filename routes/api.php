@@ -687,7 +687,7 @@ Route::middleware('throttle:10,1')->group(function () {
     Route::post('assisted-purchases/public', [AssistedPurchasePublicController::class, 'store']);
 });
 
-// --- Inbound Email Webhook (achats@monrespro.cd) ---
+// --- Inbound Email Webhook (achats@kotinda.ga) ---
 Route::post('webhooks/inbound-email', [InboundEmailController::class, 'handle']);
 
 Route::post('newsletter/subscribe', [NewsletterController::class, 'subscribe']);

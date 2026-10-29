@@ -104,12 +104,12 @@ class AuthenticationTest extends TestCase
     public function test_auth_003_login_nonexistent_email(): void
     {
         $response = $this->postJson('/api/auth/login', [
-            'login' => 'inexistant@test.monrespro.cd',
+            'login' => 'inexistant@test.kotinda.ga',
             'password' => 'anypassword',
         ]);
 
         $response->assertUnprocessable();
-        $response->assertJsonMissing(['email' => 'inexistant@test.monrespro.cd']);
+        $response->assertJsonMissing(['email' => 'inexistant@test.kotinda.ga']);
     }
 
     /** AUTH-004 : Connexion avec mauvais mot de passe → erreur générique */

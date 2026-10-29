@@ -28,7 +28,7 @@
 <body>
 @php
     $s = $settings ?? collect([]);
-    $siteName = $s['site_name'] ?? 'MONRESPRO';
+    $siteName = $s['site_name'] ?? 'KOTINDA';
     $ref = $package->reference_code ?? '—';
     $user = $package->user ?? null;
     $locker = $package->locker ?? null;
@@ -104,7 +104,7 @@
         <td class="label">Valeur déclarée</td>
         <td>
             @if(!empty($package->declared_value))
-                {{ number_format((float) $package->declared_value, 2) }} {{ $package->value_currency ?? 'USD' }}
+                {{ number_format((float) $package->declared_value, 2) }} {{ $package->value_currency ?? 'XAF' }}
             @else
                 —
             @endif

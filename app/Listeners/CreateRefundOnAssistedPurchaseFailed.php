@@ -48,7 +48,7 @@ class CreateRefundOnAssistedPurchaseFailed implements ShouldQueue
             'client_id' => $purchase->user_id,
             'agency_id' => $purchase->agency_id,
             'amount' => $amount,
-            'currency' => $purchase->quote_currency ?? 'USD',
+            'currency' => $purchase->quote_currency ?? 'XAF',
             'status' => RefundStatus::Requested,
             'reason' => 'Produit indisponible — remboursement automatique suite à l\'échec de la commande.',
             'reason_category' => 'product_unavailable',

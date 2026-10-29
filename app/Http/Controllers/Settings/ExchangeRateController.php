@@ -41,7 +41,7 @@ class ExchangeRateController extends Controller
 
         $rate = ExchangeRate::create([
             'from_currency' => strtoupper($data['from_currency']),
-            'to_currency' => strtoupper($data['to_currency'] ?? 'USD'),
+            'to_currency' => strtoupper($data['to_currency'] ?? 'XAF'),
             'rate' => $data['rate'],
             'set_by' => $request->user()->id,
             'valid_from' => now(),

@@ -4,7 +4,7 @@
     /** @var array $present */
     /** @var list<array{label: string, value: string}> $clientRows */
     $doc = $present['doc'] ?? [];
-    $site = $doc['site_name'] ?? config('app.name', 'Monrespro');
+    $site = $doc['site_name'] ?? config('app.name', 'Kotinda');
     $pdfSym = trim((string) ($doc['currency_symbol'] ?? '$'));
     $pdfSuffix = ((string) (\App\Models\Setting::getValue('symbol_position', 'prefix') ?: 'prefix')) === 'suffix';
     $pdfDec = max(0, min(6, (int) ($doc['decimals'] ?? 2)));
@@ -236,8 +236,8 @@
                     Soit {{ number_format((float) $snapshot['total_secondary'], 0, ',', ' ') }} {{ $snapshot['secondary_currency'] }}
                     (taux : {{ number_format((float) ($snapshot['exchange_rate'] ?? 0), 2, ',', ' ') }})
                 </p>
-            @elseif(!empty($present['totalCdfFormatted']))
-                <p class="secondary-total">Soit {{ $present['totalCdfFormatted'] }}</p>
+            @elseif(!empty($present['totalXafFormatted']))
+                <p class="secondary-total">Soit {{ $present['totalXafFormatted'] }}</p>
             @endif
         </td>
     </tr>

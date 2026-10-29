@@ -99,7 +99,7 @@ class InboundEmailParserService
 
         $urls = array_unique($matches[0] ?? []);
 
-        $excluded = ['monrespro.cd', 'monrespro.com', 'google.com', 'facebook.com', 'gmail.com', 'outlook.com'];
+        $excluded = ['kotinda.ga', 'kotinda.com', 'google.com', 'facebook.com', 'gmail.com', 'outlook.com'];
 
         return array_values(array_filter($urls, function (string $url) use ($excluded) {
             $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');

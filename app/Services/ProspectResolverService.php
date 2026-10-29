@@ -48,7 +48,7 @@ class ProspectResolverService
 
     private function sendProspectConfirmation(string $email, string $fullName, int $agencyId): void
     {
-        $appName = config('app.name', 'Monrespro');
+        $appName = config('app.name', 'Kotinda');
         $firstName = trim(explode(' ', $fullName)[0] ?? '') ?: 'cher client';
 
         $subject = "{$appName} — Votre demande d'achat assisté a été reçue";

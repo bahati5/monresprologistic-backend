@@ -60,7 +60,7 @@ class AssistedPurchaseQuoteMail extends Mailable
 
     public ?string $logoUrl = null;
 
-    public string $siteName = 'Monrespro';
+    public string $siteName = 'Kotinda';
 
     public string $siteEmail = '';
 
@@ -92,6 +92,7 @@ class AssistedPurchaseQuoteMail extends Mailable
             'EUR' => '€',
             'USD' => '$',
             'GBP' => '£',
+            'XAF' => 'FCFA',
             default => $this->currency,
         };
         $this->paymentUrl = $p['paymentUrl'];
@@ -117,7 +118,7 @@ class AssistedPurchaseQuoteMail extends Mailable
 
         $doc = ShipmentDocumentSettings::merged();
         $this->logoUrl = $doc['logo_url'] ?? null;
-        $this->siteName = $doc['site_name'] ?? config('app.name', 'Monrespro');
+        $this->siteName = $doc['site_name'] ?? config('app.name', 'Kotinda');
         $this->siteEmail = $doc['site_email'] ?? '';
         $this->sitePhone = $doc['phone'] ?? '';
         $this->accentColor = $doc['accent_color'] ?? $this->accentColor;
@@ -218,7 +219,7 @@ class AssistedPurchaseQuoteMail extends Mailable
 
     public function envelope(): Envelope
     {
-        $app = config('app.name', 'Monrespro');
+        $app = config('app.name', 'Kotinda');
 
         $template = $this->resolveQuoteEmailTemplate('quote_sent');
         $vars = $this->buildTemplateVariables();

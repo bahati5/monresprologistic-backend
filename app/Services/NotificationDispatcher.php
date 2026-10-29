@@ -186,7 +186,7 @@ class NotificationDispatcher
             'quote.expiring' => 'Votre devis expire bientôt',
             'payment.confirmed' => 'Paiement confirmé',
             'draft.expiring_soon' => 'Brouillon bientôt expiré',
-            default => 'Notification Monrespro',
+            default => 'Notification Kotinda',
         };
     }
 
@@ -199,7 +199,7 @@ class NotificationDispatcher
             'assisted_purchase.quote_expiring_soon' => 'Votre devis expire dans {{hours_left}}h. Acceptez ou refusez avant expiration.',
             'pickup.status_changed' => 'Votre ramassage/livraison est maintenant : {{status}}.',
             'pickup.assigned_to_driver' => 'Un ramassage vous a été assigné (client : {{client_nom}}). Statut : {{status}}.',
-            'pickup.en_route' => 'Votre chauffeur Monrespro est en route pour livrer votre colis. Référence : {{reference}}.',
+            'pickup.en_route' => 'Votre chauffeur Kotinda est en route pour livrer votre colis. Référence : {{reference}}.',
             'refund.status_changed' => 'Votre demande de remboursement est maintenant : {{status}}.',
             'refund.client_requested' => '{{client_nom}} a soumis une demande ({{reference_code}}, {{amount}} {{currency}}).',
             'refund.large_amount_pending' => 'Un remboursement de {{amount}} {{currency}} est en attente d\'approbation (dossier {{reference_code}}).',

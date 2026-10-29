@@ -85,7 +85,7 @@ class AuthController extends Controller
 
             $newUser->assignRole('client');
 
-            $prefix = Setting::getValue('locker_prefix', 'MRP');
+            $prefix = Setting::getValue('locker_prefix', 'KTD');
             $template = Setting::getValue('locker_address_template', '');
             $formatted = str_replace('{{locker_code}}', $lockerNumber, $template);
 

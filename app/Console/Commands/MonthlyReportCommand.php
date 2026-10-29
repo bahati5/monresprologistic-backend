@@ -76,7 +76,7 @@ class MonthlyReportCommand extends Command
         foreach ($recipients as $email) {
             try {
                 Mail::raw(
-                    "Bonjour,\n\nVeuillez trouver ci-joint le rapport mensuel pour {$stats['period']}.\n\nCordialement,\nMonrespro Logistic",
+                    "Bonjour,\n\nVeuillez trouver ci-joint le rapport mensuel pour {$stats['period']}.\n\nCordialement,\nKotinda Logistic",
                     function ($message) use ($email, $filename, $pdfContent, $stats) {
                         $message->to($email)
                             ->subject("Rapport mensuel — {$stats['period']}")

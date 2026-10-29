@@ -60,7 +60,7 @@ class ConfigSettingsTest extends TestCase
     {
         Sanctum::actingAs($this->superAdmin);
         $response = $this->putJson('/api/settings/app', [
-            'company_name' => 'Monrespro Logistic Test',
+            'company_name' => 'Kotinda Logistic Test',
         ]);
 
         $response->assertOk();

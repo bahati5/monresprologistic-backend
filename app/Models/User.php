@@ -232,7 +232,7 @@ class User extends Authenticatable
      */
     public static function internalStaffRoleNames(): array
     {
-        return ['super_admin', 'agency_admin', 'operator', 'customs_agent'];
+        return ['super_admin', 'agency_admin', 'operator', 'customs_agent', 'sav_agent', 'accountant'];
     }
 
     public function hasInternalStaffAppRole(): bool

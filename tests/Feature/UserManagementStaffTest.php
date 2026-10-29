@@ -53,7 +53,7 @@ class UserManagementStaffTest extends TestCase
 
         Sanctum::actingAs($admin);
 
-        $email = 'newstaff-'.uniqid('', true).'@test.monrespro.cd';
+        $email = 'newstaff-'.uniqid('', true).'@test.kotinda.ga';
 
         $response = $this->postJson('/api/users', [
             'name' => 'Jean Dupont',

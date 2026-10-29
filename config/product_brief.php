@@ -11,18 +11,18 @@ return [
     'chapter_1' => [
         'title' => 'Contexte et vision produit',
         'who' => [
-            'heading' => 'Qui est Monrespro',
+            'heading' => 'Qui est Kotinda',
             'paragraphs' => [
-                'Monrespro est une entreprise basée à Kinshasa (RD Congo), active dans la logistique internationale.',
+                'Kotinda est une entreprise basée à Libreville (Gabon), avec une agence à Port-Gentil,, active dans la logistique internationale.',
             ],
             'services' => [
                 [
                     'name' => 'Achat assisté (proxy shopping)',
-                    'description' => 'Le client envoie des liens ou des descriptions ; Monrespro achète, réceptionne et expédie. Service le plus générateur de revenus.',
+                    'description' => 'Le client envoie des liens ou des descriptions ; Kotinda achète, réceptionne et expédie. Service le plus générateur de revenus.',
                 ],
                 [
                     'name' => 'Expédition internationale',
-                    'description' => 'Dépôt au comptoir à Kinshasa pour envoi vers l’étranger (USA, Canada, Europe, autres pays africains).',
+                    'description' => 'Dépôt au comptoir à Libreville ou Port-Gentil pour envoi vers l’étranger (USA, Canada, Europe, autres pays africains).',
                 ],
                 [
                     'name' => 'Ramassage & livraison',
@@ -41,7 +41,7 @@ return [
         ],
         'vision' => [
             'heading' => 'Vision',
-            'statement' => 'Monrespro Logistic est le système nerveux central : entrées, opérations, sorties (livraison, facturation, reporting) transitent par la plateforme. Freshsales, Odoo et WordPress sont des destinations synchronisées, pas des sources de vérité.',
+            'statement' => 'Kotinda Logistic est le système nerveux central : entrées, opérations, sorties (livraison, facturation, reporting) transitent par la plateforme. Freshsales, Odoo et WordPress sont des destinations synchronisées, pas des sources de vérité.',
         ],
         'objectives' => [
             'heading' => 'Objectifs mesurables',

@@ -78,7 +78,7 @@
         @elseif(!empty($doc['logo_url']))
             <img src="{{ $doc['logo_url'] }}" class="logo-img" alt="Logo"><br>
         @else
-            <div style="font-size: 18px; font-weight: 900;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
+            <div style="font-size: 18px; font-weight: 900;">{{ $doc['site_name'] ?? 'KOTINDA' }}</div>
         @endif
         <div style="font-size: 8px; color: #333;">
             {{ $doc['phone'] ?? '' }} · {{ $doc['site_email'] ?? '' }}

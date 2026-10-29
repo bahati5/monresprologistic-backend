@@ -34,13 +34,13 @@ class FlexPayController extends Controller
         ]);
 
         $user = $request->user();
-        $reference = 'MRP-' . strtoupper(Str::random(8));
+        $reference = 'KTD-' . strtoupper(Str::random(8));
 
         $result = $this->flexPay->initiatePayment([
             'phone' => $data['phone'],
             'reference' => $reference,
             'amount' => $data['amount'],
-            'currency' => $data['currency'] ?? 'CDF',
+            'currency' => $data['currency'] ?? 'XAF',
         ]);
 
         if (! $result || ($result['code'] ?? '') !== '0') {
@@ -55,7 +55,7 @@ class FlexPayController extends Controller
             'user_id' => $user->id,
             'agency_id' => $user->agency_id,
             'amount' => $data['amount'],
-            'currency' => $data['currency'] ?? 'CDF',
+            'currency' => $data['currency'] ?? 'XAF',
             'payment_method' => 'flexpay',
             'reference' => $reference,
             'order_number' => $result['orderNumber'] ?? null,

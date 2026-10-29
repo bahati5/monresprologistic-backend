@@ -171,7 +171,7 @@ class ErrorPreventionResilienceTest extends TestCase
     /**
      * ERR-03 : Panne de l'API Odoo / Freshsales
      * Déclencher une facture alors que l'API Odoo est down (simulée).
-     * L'opération Monrespro réussit (non bloquante).
+     * L'opération Kotinda réussit (non bloquante).
      * L'erreur de synchro est loguée dans sync_errors pour un retry asynchrone exponentiel (3 tentatives).
      */
     public function test_err_03_odoo_failure_logs_sync_error_and_retries(): void

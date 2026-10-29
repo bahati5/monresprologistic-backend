@@ -42,7 +42,7 @@ class WordPressFormController extends Controller
 
         if (! $user) {
             return response()->json([
-                'error' => 'Aucun compte associé à cet email. Veuillez vous inscrire sur Monrespro.',
+                'error' => 'Aucun compte associé à cet email. Veuillez vous inscrire sur Kotinda.',
                 'code'  => 'user_not_found',
             ], 404);
         }
@@ -53,7 +53,7 @@ class WordPressFormController extends Controller
             'product_name'    => $data['product_name'] ?? null,
             'quantity'        => $data['quantity'],
             'declared_value'  => $data['declared_value'] ?? null,
-            'currency'        => $data['currency'] ?? 'USD',
+            'currency'        => $data['currency'] ?? 'XAF',
             'size'            => $data['size'] ?? null,
             'color'           => $data['color'] ?? null,
             'notes'           => $data['notes'] ?? null,

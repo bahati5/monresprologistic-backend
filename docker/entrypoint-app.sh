@@ -34,7 +34,7 @@ fi
 # Sur un bind-mount Windows, chaque requete re-lit des dizaines de fichiers
 # (config, routes, vues) a travers une couche de virtualisation tres lente.
 # Ces caches les consolident en fichiers uniques -> gain de 10-60 s/requete.
-# Pour rafraichir : docker exec monrespro_app php artisan optimize:clear
+# Pour rafraichir : docker exec kotinda_app php artisan optimize:clear
 echo "[entrypoint] Generation des caches Laravel (config, routes, vues, events)..."
 php artisan config:cache
 php artisan route:cache

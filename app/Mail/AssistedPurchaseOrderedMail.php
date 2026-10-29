@@ -15,7 +15,7 @@ class AssistedPurchaseOrderedMail extends Mailable
     use Queueable, SerializesModels;
 
     public ?string $logoUrl = null;
-    public string $siteName = 'Monrespro';
+    public string $siteName = 'Kotinda';
     public string $siteEmail = '';
     public string $sitePhone = '';
     public string $accentColor = '#073763';
@@ -41,7 +41,7 @@ class AssistedPurchaseOrderedMail extends Mailable
 
         $doc = ShipmentDocumentSettings::merged();
         $this->logoUrl = $doc['logo_url'] ?? null;
-        $this->siteName = $doc['site_name'] ?? config('app.name', 'Monrespro');
+        $this->siteName = $doc['site_name'] ?? config('app.name', 'Kotinda');
         $this->siteEmail = $doc['site_email'] ?? '';
         $this->sitePhone = $doc['phone'] ?? '';
         $this->accentColor = $doc['accent_color'] ?? $this->accentColor;

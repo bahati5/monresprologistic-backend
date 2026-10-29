@@ -186,7 +186,7 @@ class SyncFreshsalesListener implements ShouldQueue
      */
     private function buildContactTags(mixed $user): array
     {
-        $tags = ['monrespro_client'];
+        $tags = ['kotinda_client'];
 
         if ($user->agency) {
             $tags[] = 'agence_' . \Illuminate\Support\Str::slug($user->agency->name ?? 'inconnu');

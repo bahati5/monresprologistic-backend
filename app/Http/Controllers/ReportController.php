@@ -49,7 +49,7 @@ class ReportController extends Controller
             'generated_at' => now()->format('d/m/Y H:i'),
         ])->setPaper('a4', 'portrait');
 
-        $filename = 'monrespro-rapport-'.$section.'-'.now()->format('Y-m-d').'.pdf';
+        $filename = 'kotinda-rapport-'.$section.'-'.now()->format('Y-m-d').'.pdf';
 
         return $pdf->download($filename);
     }

@@ -31,7 +31,7 @@ class QuoteReminderMail extends Mailable
     public ?string $templateIntroHtml = null;
 
     public ?string $logoUrl = null;
-    public string $siteName = 'Monrespro';
+    public string $siteName = 'Kotinda';
     public string $siteEmail = '';
     public string $sitePhone = '';
     public string $accentColor = '#073763';
@@ -54,7 +54,7 @@ class QuoteReminderMail extends Mailable
             ? number_format((float) $snapshot->total_primary, 2, ',', ' ')
             : number_format((float) ($purchase->total_amount ?? 0), 2, ',', ' ');
 
-        $this->currency = $snapshot?->primary_currency ?? 'USD';
+        $this->currency = $snapshot?->primary_currency ?? 'XAF';
         $this->expiresAt = $purchase->quote_expires_at?->format('d/m/Y');
 
         $this->responseUrl = $snapshot?->response_token
@@ -63,7 +63,7 @@ class QuoteReminderMail extends Mailable
 
         $doc = ShipmentDocumentSettings::merged();
         $this->logoUrl = $doc['logo_url'] ?? null;
-        $this->siteName = $doc['site_name'] ?? config('app.name', 'Monrespro');
+        $this->siteName = $doc['site_name'] ?? config('app.name', 'Kotinda');
         $this->siteEmail = $doc['site_email'] ?? '';
         $this->sitePhone = $doc['phone'] ?? '';
         $this->accentColor = $doc['accent_color'] ?? $this->accentColor;

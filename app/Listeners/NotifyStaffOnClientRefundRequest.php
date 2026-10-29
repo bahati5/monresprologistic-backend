@@ -36,7 +36,7 @@ class NotifyStaffOnClientRefundRequest implements ShouldQueue
                 variables: [
                     'reference_code' => $refund->reference_code,
                     'amount' => number_format((float) $refund->amount, 2),
-                    'currency' => $refund->currency ?? 'USD',
+                    'currency' => $refund->currency ?? 'XAF',
                     'client_nom' => $refund->client?->name ?? $actor->name ?? '',
                 ],
                 actionUrl: '/finance/refunds',

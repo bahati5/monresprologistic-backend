@@ -38,7 +38,7 @@ class AgencyController extends Controller
             'city_id' => ['nullable', 'integer', 'exists:cities,id'],
         ]);
 
-        $currency = strtoupper((string) (Setting::getValue('currency', 'USD') ?? 'USD'));
+        $currency = strtoupper((string) (Setting::getValue('currency', 'XAF') ?? 'XAF'));
         if (strlen($currency) > 8) {
             $currency = substr($currency, 0, 8);
         }

@@ -142,7 +142,7 @@ class FinanceRefundWorkflowTest extends TestCase
     /**
      * FIN-02 : Impact comptable automatique
      * Approbation et traitement final du remboursement (PROCESSED).
-     * Écriture au grand livre Monrespro + Création asynchrone d'une note de crédit dans Odoo via API.
+     * Écriture au grand livre Kotinda + Création asynchrone d'une note de crédit dans Odoo via API.
      */
     public function test_fin_02_refund_creates_ledger_entry_and_odoo_credit_note(): void
     {

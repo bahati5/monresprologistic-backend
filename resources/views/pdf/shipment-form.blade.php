@@ -76,7 +76,7 @@
     $recipPhoneAlt = $rp?->phone_secondary ?? '';
     $recipEmail = $rp?->email ?? '';
 
-    $cur = $shipment->currency ?? $doc['currency'] ?? 'USD';
+    $cur = $shipment->currency ?? $doc['currency'] ?? 'XAF';
     $volDiv = max(0.0001, (float) ($doc['volumetric_divisor'] ?? 5000));
     $nbColis = max(1, (int) ($shipment->items->sum(fn($i) => max(1, (int)($i->quantity ?? 1)))));
 
@@ -95,7 +95,7 @@
                 @elseif(!empty($doc['logo_url']))
                     <img src="{{ $doc['logo_url'] }}" alt="Logo" height="40">
                 @else
-                    <div style="font-size: 20px; font-weight: 800; color: #2563eb;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
+                    <div style="font-size: 20px; font-weight: 800; color: #2563eb;">{{ $doc['site_name'] ?? 'KOTINDA' }}</div>
                 @endif
             </td>
             <td class="title-cell">
@@ -265,7 +265,7 @@
     </table>
 
     <div class="meta-footer">
-        Document généré le {{ now()->format('d/m/Y à H:i') }} — {{ $doc['site_name'] ?? 'Monrespro' }} — {{ $tracking }}
+        Document généré le {{ now()->format('d/m/Y à H:i') }} — {{ $doc['site_name'] ?? 'Kotinda' }} — {{ $tracking }}
     </div>
 </body>
 </html>

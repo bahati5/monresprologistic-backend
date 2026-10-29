@@ -56,7 +56,7 @@
             @elseif(!empty($doc['logo_url']))
                 <img src="{{ $doc['logo_url'] }}" alt="Logo" height="36" style="margin-bottom: 4px;"><br>
             @else
-                <div style="font-size: 18px; font-weight: 900; color: #064e3b;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
+                <div style="font-size: 18px; font-weight: 900; color: #064e3b;">{{ $doc['site_name'] ?? 'KOTINDA' }}</div>
             @endif
             <div style="font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-top: 2px;">Bon de {{ $type }}</div>
             <div style="margin-top: 6px;"><span class="badge {{ $badgeClass }}">{{ strtoupper($type) }}</span></div>
@@ -133,7 +133,7 @@
             <td style="border: 1px solid #cbd5e1; padding: 4px 6px; font-size: 10px;">{{ $item->description }}</td>
             <td style="border: 1px solid #cbd5e1; padding: 4px 6px; text-align: center; font-size: 10px;">{{ $item->quantity ?? 1 }}</td>
             <td style="border: 1px solid #cbd5e1; padding: 4px 6px; text-align: right; font-size: 10px;">
-                {{ $item->value ? number_format((float) $item->value, 2).' '.($shipment->currency ?? 'USD') : '—' }}
+                {{ $item->value ? number_format((float) $item->value, 2).' '.($shipment->currency ?? 'XAF') : '—' }}
             </td>
         </tr>
         @endforeach
@@ -164,7 +164,7 @@
 </table>
 
 <div class="footer">
-    Monrespro Logistic · Bon généré le {{ $generatedAt }} · Conserver ce document
+    Kotinda Logistic · Bon généré le {{ $generatedAt }} · Conserver ce document
 </div>
 
 </body>

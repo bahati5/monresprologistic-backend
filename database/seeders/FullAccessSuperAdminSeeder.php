@@ -26,7 +26,7 @@ class FullAccessSuperAdminSeeder extends Seeder
     {
         app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
-        $email = env('SEED_SUPER_ADMIN_EMAIL', 'admin@monrespro.local');
+        $email = env('SEED_SUPER_ADMIN_EMAIL', 'admin@kotinda.local');
 
         $user = User::query()->where('email', $email)->first();
         if (! $user) {

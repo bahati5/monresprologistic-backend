@@ -51,7 +51,7 @@
 @php
     $sp = $shipment->senderProfile;
     $rp = $shipment->recipientProfile;
-    $cur = $shipment->currency ?? $doc['currency'] ?? 'USD';
+    $cur = $shipment->currency ?? $doc['currency'] ?? 'XAF';
     $snap = $shipment->pricing_snapshot ?? [];
 
     $recipName = $rp?->full_name ?? '—';
@@ -84,7 +84,7 @@
                 @elseif(!empty($doc['logo_url']))
                     <img src="{{ $doc['logo_url'] }}" alt="Logo" height="40">
                 @else
-                    <div style="font-size: 20px; font-weight: 800; color: #2563eb;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
+                    <div style="font-size: 20px; font-weight: 800; color: #2563eb;">{{ $doc['site_name'] ?? 'KOTINDA' }}</div>
                 @endif
             </td>
             <td class="company-info-cell">

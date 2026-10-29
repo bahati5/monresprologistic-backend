@@ -40,7 +40,7 @@
             @elseif(!empty($doc['logo_url']))
                 <img src="{{ $doc['logo_url'] }}" alt="Logo" height="40" style="margin-bottom: 4px;">
             @else
-                <div style="font-size: 22px; font-weight: 900; color: #2563eb; margin-bottom: 2px;">{{ $doc['site_name'] ?? 'MONRESPRO' }}</div>
+                <div style="font-size: 22px; font-weight: 900; color: #2563eb; margin-bottom: 2px;">{{ $doc['site_name'] ?? 'KOTINDA' }}</div>
             @endif
             <div style="font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px;">Rapport de suivi d'expédition</div>
             <div style="font-size: 11px; font-weight: 900; color: #1e3a5f; margin-top: 4px;">N° {{ $tracking }}</div>
@@ -86,7 +86,7 @@
         <td class="label">Valeur déclarée</td>
         <td>
             @if(!empty($shipment->declared_value))
-                {{ number_format((float) $shipment->declared_value, 2) }} {{ $shipment->currency ?? 'USD' }}
+                {{ number_format((float) $shipment->declared_value, 2) }} {{ $shipment->currency ?? 'XAF' }}
             @else—@endif
         </td>
     </tr>
@@ -119,7 +119,7 @@
 
 {{-- Pied de page --}}
 <div style="margin-top: 20px; border-top: 1px solid #cbd5e1; padding-top: 8px; font-size: 9px; color: #94a3b8; text-align: center;">
-    Ce document est généré automatiquement par Monrespro Logistic. Il constitue un relevé d'activité officiel et immuable.
+    Ce document est généré automatiquement par Kotinda Logistic. Il constitue un relevé d'activité officiel et immuable.
     En cas de litige, ce document peut être utilisé comme preuve de traitement.
 </div>
 

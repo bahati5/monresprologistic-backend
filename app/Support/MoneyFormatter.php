@@ -12,7 +12,7 @@ class MoneyFormatter
     public static function formatAmount(float $amount): string
     {
         $decimals = max(0, min(4, (int) (Setting::getValue('decimals', '2') ?: 2)));
-        $symbol = (string) (Setting::getValue('currency_symbol', '€') ?: '€');
+        $symbol = (string) (Setting::getValue('currency_symbol', 'FCFA') ?: 'FCFA');
         $position = (string) (Setting::getValue('symbol_position', 'prefix') ?: 'prefix');
         $formatted = number_format($amount, $decimals, ',', "\u{00a0}");
 
@@ -21,6 +21,6 @@ class MoneyFormatter
 
     public static function currencyCode(): string
     {
-        return (string) (Setting::getValue('currency', 'EUR') ?: 'EUR');
+        return (string) (Setting::getValue('currency', 'XAF') ?: 'XAF');
     }
 }

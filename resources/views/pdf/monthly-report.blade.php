@@ -17,7 +17,7 @@
     </style>
 </head>
 <body>
-    <h1>Rapport Mensuel — Monrespro Logistic</h1>
+    <h1>Rapport Mensuel — Kotinda Logistic</h1>
     <p style="color: #64748b;">Période : {{ $stats['period'] }}</p>
 
     <div class="kpi-grid">

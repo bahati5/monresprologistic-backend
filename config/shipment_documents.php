@@ -8,14 +8,14 @@ return [
     |--------------------------------------------------------------------------
     */
     'defaults' => [
-        'site_name' => 'Monrespro',
+        'site_name' => 'Kotinda',
     ],
 
     /**
      * Texte des conditions affiché sur la facture d’expédition si aucun texte n’est défini dans les paramètres (clé invoice_terms).
      */
     'default_invoice_terms' => <<<'TXT'
-ACCEPTÉ : L'expéditeur déclare ne pas envoyer d'argent, d'explosifs, d'armes, de bijoux ni de produits chimiques. En cas de saisie douanière, les taxes seront à la charge du client. Monrespro prendra en charge la valeur de la marchandise entre 0,00 $ et 100 $, selon l'évaluation et les critères établis par l'entreprise. Monrespro décline toute responsabilité en cas de casse ou de dommage. Le client autorise l'agent à examiner visuellement le contenu du colis.
+ACCEPTÉ : L'expéditeur déclare ne pas envoyer d'argent, d'explosifs, d'armes, de bijoux ni de produits chimiques. En cas de saisie douanière, les taxes seront à la charge du client. Kotinda prendra en charge la valeur de la marchandise entre 0,00 $ et 100 $, selon l'évaluation et les critères établis par l'entreprise. Kotinda décline toute responsabilité en cas de casse ou de dommage. Le client autorise l'agent à examiner visuellement le contenu du colis.
 TXT,
 
     'logo_thumb' => [

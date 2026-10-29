@@ -21,7 +21,7 @@ class RolePermissionController extends Controller
             'name' => $role->name,
             'permissions' => $role->permissions->pluck('name')->all(),
             'users_count' => $role->users()->count(),
-            'is_system' => in_array($role->name, ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent', 'client'], true),
+            'is_system' => in_array($role->name, ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent', 'sav_agent', 'accountant', 'client'], true),
         ]);
 
         $permissions = Permission::query()->orderBy('name')->get(['id', 'name']);
@@ -74,7 +74,7 @@ class RolePermissionController extends Controller
     {
         abort_unless($request->user()->hasRole('super_admin'), 403);
 
-        $systemRoles = ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent', 'client'];
+        $systemRoles = ['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent', 'sav_agent', 'accountant', 'client'];
         if (in_array($role->name, $systemRoles, true)) {
             return response()->json(['message' => 'Impossible de supprimer un rôle système.'], 422);
         }

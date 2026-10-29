@@ -11,7 +11,7 @@ class SuperAdminSeeder extends Seeder
 {
     public function run(): void
     {
-        $email = env('SEED_SUPER_ADMIN_EMAIL', 'admin@monrespro.local');
+        $email = env('SEED_SUPER_ADMIN_EMAIL', 'admin@kotinda.local');
         $password = env('SEED_SUPER_ADMIN_PASSWORD', 'password');
 
         $profile = Profile::updateOrCreate(

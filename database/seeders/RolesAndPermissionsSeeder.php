@@ -28,6 +28,8 @@ class RolesAndPermissionsSeeder extends Seeder
             'tracking.view',
             'reports.view', 'reports.export',
             'analytics.view',
+            'sav.view', 'sav.manage', 'sav.client',
+            'suivi.view',
             'admin.manage_settings', 'admin.manage_agencies', 'admin.manage_statuses',
             'admin.manage_pricing', 'admin.manage_notifications', 'admin.manage_newsletter',
             'admin.manage_backups', 'admin.manage_documents',
@@ -79,10 +81,18 @@ class RolesAndPermissionsSeeder extends Seeder
             'customs_agent' => [
                 'shipments.view', 'shipments.edit', 'tracking.view',
             ],
+            'sav_agent' => [
+                'sav.view', 'sav.manage', 'crm.view',
+                'shipments.view', 'tracking.view', 'customer_packages.view',
+            ],
+            'accountant' => [
+                'finance.view_payments', 'finance.approve_payments', 'finance.manage',
+                'finance.manage_refunds', 'finance.approve_refunds',
+                'reports.view', 'reports.export', 'crm.view',
+            ],
             'client' => [
                 'shipments.view', 'lockers.view',
-                'pre_alerts.manage', 'assisted_purchase.manage',
-                'customer_packages.view', 'tracking.view',
+                'customer_packages.view', 'tracking.view', 'sav.client',
             ],
         ];
 

@@ -1,17 +1,17 @@
 /**
- * §17 — Widget de suivi Monrespro Logistic pour WordPress
- * Usage: <div data-monrespro-tracking></div>
- * Shortcode WordPress: [monrespro_tracking]
+ * §17 — Widget de suivi Kotinda Logistic pour WordPress
+ * Usage: <div data-kotinda-tracking></div>
+ * Shortcode WordPress: [kotinda_tracking]
  *
  * Configuration:
- *   window.MonresproConfig = { apiUrl: 'https://app.monrespro.cd/api' }
+ *   window.KotindaConfig = { apiUrl: 'https://app.kotinda.ga/api' }
  */
 (function () {
   'use strict';
 
-  var API_URL = (window.MonresproConfig && window.MonresproConfig.apiUrl)
-    ? window.MonresproConfig.apiUrl.replace(/\/$/, '')
-    : 'https://app.monrespro.cd/api';
+  var API_URL = (window.KotindaConfig && window.KotindaConfig.apiUrl)
+    ? window.KotindaConfig.apiUrl.replace(/\/$/, '')
+    : 'https://app.kotinda.ga/api';
 
   var STATUS_ICONS = {
     draft: '📦',
@@ -38,7 +38,7 @@
   function createWidget(container) {
     container.innerHTML = [
       '<div class="mrp-widget" style="font-family:sans-serif;border:1px solid #e2e8f0;border-radius:8px;padding:16px;max-width:480px;">',
-      '  <div style="margin-bottom:12px;font-weight:600;color:#1e293b;">Suivi de colis Monrespro</div>',
+      '  <div style="margin-bottom:12px;font-weight:600;color:#1e293b;">Suivi de colis Kotinda</div>',
       '  <div style="display:flex;gap:8px;">',
       '    <input id="mrp-input" type="text" placeholder="Entrez votre numéro de suivi..."',
       '      style="flex:1;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;" />',
@@ -104,7 +104,7 @@
   }
 
   function init() {
-    var containers = document.querySelectorAll('[data-monrespro-tracking]');
+    var containers = document.querySelectorAll('[data-kotinda-tracking]');
     for (var i = 0; i < containers.length; i++) {
       createWidget(containers[i]);
     }

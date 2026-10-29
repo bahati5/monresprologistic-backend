@@ -12,7 +12,7 @@ class MerchantSeeder extends Seeder
         $merchants = [
             [
                 'name' => 'Amazon',
-                'domains' => ['amazon.com', 'amazon.fr', 'amazon.de', 'amzn.eu', 'a.co'],
+                'domains' => ['amazon.com', 'amazon.fr', 'amazon.de', 'amazon.ae', 'amzn.eu', 'a.co'],
                 'logo_url' => 'https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg',
             ],
             [
@@ -49,6 +49,17 @@ class MerchantSeeder extends Seeder
                 'name' => 'StockX',
                 'domains' => ['stockx.com'],
                 'logo_url' => 'https://upload.wikimedia.org/wikipedia/commons/b/b3/StockX_Logo.svg',
+            ],
+            // Marchands fréquents pour les achats depuis Dubaï et la Chine (clientèle gabonaise)
+            [
+                'name' => 'Noon',
+                'domains' => ['noon.com'],
+                'logo_url' => null,
+            ],
+            [
+                'name' => '1688',
+                'domains' => ['1688.com', 'detail.1688.com'],
+                'logo_url' => null,
             ],
         ];
 

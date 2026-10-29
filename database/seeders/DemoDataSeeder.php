@@ -40,7 +40,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
- * Données transactionnelles massives pour la démo vidéo Monrespro Logistics.
+ * Données transactionnelles massives pour la démo vidéo Kotinda (Gabon).
  *
  * Pré-requis : DatabaseSeeder (FullPlatformSeeder + RbacSeeder) déjà exécuté.
  *
@@ -50,18 +50,22 @@ use Illuminate\Support\Str;
  * tickets SAV + messages, réponses rapides SAV, remboursements,
  * notifications, abonnés newsletter, commentaires.
  *
+ * Montants facturés en XAF (FCFA) : 1 EUR = 655,957 XAF, 1 USD ≈ 600 XAF, 1 AED ≈ 163 XAF.
+ * Tous les comptes démo utilisent le mot de passe « password ».
+ *
  * Usage : php artisan db:seed --class=DemoDataSeeder
  */
 class DemoDataSeeder extends Seeder
 {
-    private Agency $kinshasa;
-    private ?Agency $bruxelles;
+    private Agency $libreville;
+    private ?Agency $portGentil;
     private ?Agency $paris;
     private ?Agency $guangzhou;
+    private ?Agency $dubai;
 
     private User $superAdmin;
-    private User $adminKin;
-    private User $adminBxl;
+    private User $adminLbv;
+    private User $adminPar;
     private User $operator;
     private User $driver;
     private User $customs;
@@ -75,10 +79,10 @@ class DemoDataSeeder extends Seeder
     /** @var array<string, Profile> */
     private array $recipientProfiles = [];
 
-    private ?int $countryCD;
-    private ?int $countryBE;
+    private ?int $countryGA;
     private ?int $countryFR;
     private ?int $countryCN;
+    private ?int $countryAE;
     private ?int $countryUS;
 
     public function run(): void
@@ -107,26 +111,46 @@ class DemoDataSeeder extends Seeder
 
     private function loadReferences(): void
     {
-        $this->kinshasa = Agency::where('code', 'KIN')->firstOrFail();
-        $this->bruxelles = Agency::where('code', 'BXL')->first();
+        $this->libreville = Agency::where('code', 'LBV')->firstOrFail();
+        $this->portGentil = Agency::where('code', 'POG')->first();
         $this->paris = Agency::where('code', 'PAR')->first();
-        $this->guangzhou = Agency::where('code', 'GZ')->first();
+        $this->guangzhou = Agency::where('code', 'GZH')->first();
+        $this->dubai = Agency::where('code', 'DXB')->first();
 
-        $this->superAdmin = User::where('email', 'admin@monrespro.local')->firstOrFail();
-        $this->adminKin = User::where('email', 'admin.kin@monrespro.local')->firstOrFail();
-        $this->adminBxl = User::where('email', 'admin.bxl@monrespro.local')->firstOrFail();
-        $this->operator = User::where('email', 'operateur@monrespro.local')->firstOrFail();
-        $this->driver = User::where('email', 'livreur@monrespro.local')->firstOrFail();
-        $this->customs = User::where('email', 'douane@monrespro.local')->firstOrFail();
-        $this->client1 = User::where('email', 'client1@monrespro.local')->firstOrFail();
-        $this->client2 = User::where('email', 'client2@monrespro.local')->firstOrFail();
-        $this->client3 = User::where('email', 'client3@monrespro.local')->firstOrFail();
+        $this->superAdmin = User::where('email', env('SEED_SUPER_ADMIN_EMAIL', 'admin@kotinda.local'))->firstOrFail();
+        $this->adminLbv = User::where('email', 'admin.lbv@kotinda.local')->firstOrFail();
+        $this->adminPar = User::where('email', 'admin.par@kotinda.local')->firstOrFail();
+        $this->operator = User::where('email', 'operateur@kotinda.local')->firstOrFail();
+        $this->driver = User::where('email', 'livreur@kotinda.local')->firstOrFail();
+        $this->customs = User::where('email', 'douane@kotinda.local')->firstOrFail();
+        $this->client1 = User::where('email', 'client1@kotinda.local')->firstOrFail();
+        $this->client2 = User::where('email', 'client2@kotinda.local')->firstOrFail();
+        $this->client3 = User::where('email', 'client3@kotinda.local')->firstOrFail();
 
-        $this->countryCD = DB::table('countries')->where('iso2', 'CD')->value('id');
-        $this->countryBE = DB::table('countries')->where('iso2', 'BE')->value('id');
+        $this->countryGA = DB::table('countries')->where('iso2', 'GA')->value('id');
         $this->countryFR = DB::table('countries')->where('iso2', 'FR')->value('id');
         $this->countryCN = DB::table('countries')->where('iso2', 'CN')->value('id');
+        $this->countryAE = DB::table('countries')->where('iso2', 'AE')->value('id');
         $this->countryUS = DB::table('countries')->where('iso2', 'US')->value('id');
+    }
+
+    /**
+     * Identifiants pays / région / ville depuis le référentiel géographique.
+     *
+     * @return array{country_id: ?int, state_id: ?int, city_id: ?int}
+     */
+    private function locate(string $iso2, string $cityName): array
+    {
+        $countryId = DB::table('countries')->where('iso2', $iso2)->value('id');
+        $city = $countryId
+            ? DB::table('cities')->where('country_id', $countryId)->where('name', $cityName)->first(['id', 'state_id'])
+            : null;
+
+        return [
+            'country_id' => $countryId,
+            'state_id' => $city?->state_id,
+            'city_id' => $city?->id,
+        ];
     }
 
     // ─── Clients supplémentaires (pour volume analytics) ────────────────
@@ -136,16 +160,15 @@ class DemoDataSeeder extends Seeder
         $this->command?->info('Clients supplémentaires…');
 
         $clients = [
-            ['first' => 'Marie', 'last' => 'Lukusa', 'email' => 'marie.lukusa@monrespro.local', 'phone' => '+243 900 600 001', 'agency' => $this->kinshasa, 'locker' => 'MRP-KIN-0003'],
-            ['first' => 'Samuel', 'last' => 'Kibangula', 'email' => 'samuel.kib@monrespro.local', 'phone' => '+243 900 600 002', 'agency' => $this->kinshasa, 'locker' => 'MRP-KIN-0004'],
-            ['first' => 'Rachel', 'last' => 'Mbuyi', 'email' => 'rachel.mbuyi@monrespro.local', 'phone' => '+243 900 600 003', 'agency' => $this->kinshasa, 'locker' => 'MRP-KIN-0005'],
-            ['first' => 'Christian', 'last' => 'Nseka', 'email' => 'christian.nseka@monrespro.local', 'phone' => '+243 900 600 004', 'agency' => $this->kinshasa, 'locker' => 'MRP-KIN-0006'],
-            ['first' => 'Esther', 'last' => 'Tshilanda', 'email' => 'esther.tshi@monrespro.local', 'phone' => '+243 900 600 005', 'agency' => $this->kinshasa, 'locker' => 'MRP-KIN-0007'],
-            ['first' => 'Jean-Pierre', 'last' => 'Bakajika', 'email' => 'jp.bakajika@monrespro.local', 'phone' => '+243 900 600 006', 'agency' => $this->kinshasa, 'locker' => 'MRP-KIN-0008'],
-            ['first' => 'Nadine', 'last' => 'Kapinga', 'email' => 'nadine.kap@monrespro.local', 'phone' => '+32 460 600 001', 'agency' => $this->bruxelles, 'locker' => 'MRP-BXL-0002'],
-            ['first' => 'Olivier', 'last' => 'Ngandu', 'email' => 'olivier.ng@monrespro.local', 'phone' => '+32 460 600 002', 'agency' => $this->bruxelles, 'locker' => 'MRP-BXL-0003'],
-            ['first' => 'Francine', 'last' => 'Kabamba', 'email' => 'francine.kab@monrespro.local', 'phone' => '+33 6 00 00 01', 'agency' => $this->paris, 'locker' => 'MRP-PAR-0001'],
-            ['first' => 'Didier', 'last' => 'Mutombo', 'email' => 'didier.mut@monrespro.local', 'phone' => '+33 6 00 00 02', 'agency' => $this->paris, 'locker' => 'MRP-PAR-0002'],
+            ['first' => 'Aurélie', 'last' => 'Mba', 'email' => 'aurelie.mba@kotinda.local', 'phone' => '+241 077 60 00 01', 'address' => 'Quartier Glass, Libreville', 'city' => ['GA', 'Libreville'], 'agency' => $this->libreville, 'locker' => 'KTD-LBV-0003'],
+            ['first' => 'Fabrice', 'last' => 'Nguema', 'email' => 'fabrice.nguema@kotinda.local', 'phone' => '+241 066 60 00 02', 'address' => 'Owendo, cité SNI', 'city' => ['GA', 'Owendo'], 'agency' => $this->libreville, 'locker' => 'KTD-LBV-0004'],
+            ['first' => 'Nadège', 'last' => 'Mouélé', 'email' => 'nadege.mouele@kotinda.local', 'phone' => '+241 077 60 00 03', 'address' => 'Nzeng-Ayong, Libreville', 'city' => ['GA', 'Libreville'], 'agency' => $this->libreville, 'locker' => 'KTD-LBV-0005'],
+            ['first' => 'Yannick', 'last' => 'Bongo', 'email' => 'yannick.bongo@kotinda.local', 'phone' => '+241 066 60 00 04', 'address' => 'Cap Estérias, Akanda', 'city' => ['GA', 'Libreville'], 'agency' => $this->libreville, 'locker' => 'KTD-LBV-0006'],
+            ['first' => 'Estelle', 'last' => 'Mintsa', 'email' => 'estelle.mintsa@kotinda.local', 'phone' => '+241 077 60 00 05', 'address' => 'Quartier Louis, Libreville', 'city' => ['GA', 'Libreville'], 'agency' => $this->libreville, 'locker' => 'KTD-LBV-0007'],
+            ['first' => 'Carine', 'last' => 'Moussavou', 'email' => 'carine.moussavou@kotinda.local', 'phone' => '+241 077 60 00 06', 'address' => 'Quartier Balise, Port-Gentil', 'city' => ['GA', 'Port-Gentil'], 'agency' => $this->portGentil, 'locker' => 'KTD-POG-0002'],
+            ['first' => 'Rodrigue', 'last' => 'Koumba', 'email' => 'rodrigue.koumba@kotinda.local', 'phone' => '+241 066 60 00 07', 'address' => 'Quartier Sindara, Port-Gentil', 'city' => ['GA', 'Port-Gentil'], 'agency' => $this->portGentil, 'locker' => 'KTD-POG-0003'],
+            ['first' => 'Murielle', 'last' => 'Ndong', 'email' => 'murielle.ndong@kotinda.local', 'phone' => '+33 6 11 22 33 01', 'address' => 'Rue de la Roquette, 75011 Paris', 'city' => ['FR', 'Paris'], 'agency' => $this->paris, 'locker' => 'KTD-PAR-0001'],
+            ['first' => 'Landry', 'last' => 'Obiang', 'email' => 'landry.obiang@kotinda.local', 'phone' => '+33 6 11 22 33 02', 'address' => 'Avenue Jean Jaurès, 75019 Paris', 'city' => ['FR', 'Paris'], 'agency' => $this->paris, 'locker' => 'KTD-PAR-0002'],
         ];
 
         foreach ($clients as $c) {
@@ -156,7 +179,10 @@ class DemoDataSeeder extends Seeder
 
             $profile = Profile::updateOrCreate(
                 ['email' => $c['email']],
-                ['first_name' => $c['first'], 'last_name' => $c['last'], 'phone' => $c['phone'], 'agency_id' => $agency->id, 'is_active' => true, 'is_staff' => false, 'is_client' => true]
+                array_merge(
+                    ['first_name' => $c['first'], 'last_name' => $c['last'], 'phone' => $c['phone'], 'address' => $c['address'], 'agency_id' => $agency->id, 'is_active' => true, 'is_staff' => false, 'is_client' => true],
+                    $this->locate(...$c['city'])
+                )
             );
 
             $user = User::updateOrCreate(
@@ -168,7 +194,7 @@ class DemoDataSeeder extends Seeder
 
             Locker::updateOrCreate(
                 ['code' => $c['locker']],
-                ['profile_id' => $profile->id, 'user_id' => $user->id, 'formatted_address' => "Monrespro Logistics – Casier {$c['locker']}"]
+                ['profile_id' => $profile->id, 'user_id' => $user->id, 'formatted_address' => "Kotinda Hub Paris – Casier {$c['locker']}, zone de fret Roissy-CDG, 95700 Roissy-en-France, France"]
             );
 
             $this->extraClients[$c['email']] = $user;
@@ -182,13 +208,13 @@ class DemoDataSeeder extends Seeder
         $this->command?->info('Profils destinataires…');
 
         $recipients = [
-            ['first' => 'Papa', 'last' => 'Kalala', 'email' => 'papa.kalala@gmail.com', 'phone' => '+243 999 100 001', 'agency' => $this->kinshasa],
-            ['first' => 'Maman', 'last' => 'Ngoy', 'email' => 'maman.ngoy@gmail.com', 'phone' => '+243 999 100 002', 'agency' => $this->kinshasa],
-            ['first' => 'Tonton', 'last' => 'Ilunga', 'email' => 'tonton.ilunga@gmail.com', 'phone' => '+243 999 100 003', 'agency' => $this->kinshasa],
-            ['first' => 'Sœur', 'last' => 'Mwamba', 'email' => 'soeur.mwamba@gmail.com', 'phone' => '+243 999 100 004', 'agency' => $this->kinshasa],
-            ['first' => 'Cousin', 'last' => 'Kabongo', 'email' => 'cousin.kabongo@gmail.com', 'phone' => '+243 999 100 005', 'agency' => $this->kinshasa],
-            ['first' => 'Amie', 'last' => 'Laurent', 'email' => 'amie.laurent@outlook.com', 'phone' => '+32 470 100 001', 'agency' => $this->bruxelles],
-            ['first' => 'Collègue', 'last' => 'Dubois', 'email' => 'collegue.dubois@outlook.com', 'phone' => '+33 7 00 00 01', 'agency' => $this->paris],
+            ['first' => 'Jean-Pierre', 'last' => 'Nzé', 'email' => 'jp.nze@gmail.com', 'phone' => '+241 077 99 10 01', 'address' => 'Quartier Louis, Libreville', 'city' => ['GA', 'Libreville'], 'agency' => $this->libreville],
+            ['first' => 'Pauline', 'last' => 'Ondo', 'email' => 'pauline.ondo@gmail.com', 'phone' => '+241 066 99 10 02', 'address' => 'Angondjé, Akanda', 'city' => ['GA', 'Libreville'], 'agency' => $this->libreville],
+            ['first' => 'Gaston', 'last' => 'Moussavou', 'email' => 'gaston.moussavou@gmail.com', 'phone' => '+241 077 99 10 03', 'address' => 'Quartier Grand Village, Port-Gentil', 'city' => ['GA', 'Port-Gentil'], 'agency' => $this->portGentil ?? $this->libreville],
+            ['first' => 'Sylvie', 'last' => 'Mintsa', 'email' => 'sylvie.mintsa@gmail.com', 'phone' => '+241 077 99 10 04', 'address' => 'Quartier Glass, Libreville', 'city' => ['GA', 'Libreville'], 'agency' => $this->libreville],
+            ['first' => 'Kévin', 'last' => 'Ndong', 'email' => 'kevin.ndong@gmail.com', 'phone' => '+241 066 99 10 05', 'address' => 'Owendo, quartier Alénakiri', 'city' => ['GA', 'Owendo'], 'agency' => $this->libreville],
+            ['first' => 'Mireille', 'last' => 'Mouélé', 'email' => 'mireille.mouele@outlook.com', 'phone' => '+33 7 55 10 00 01', 'address' => 'Boulevard Voltaire, 75011 Paris', 'city' => ['FR', 'Paris'], 'agency' => $this->paris],
+            ['first' => 'Ludovic', 'last' => 'Nguema', 'email' => 'ludovic.nguema@outlook.com', 'phone' => '+241 077 99 10 07', 'address' => 'Franceville, quartier Potos', 'city' => ['GA', 'Franceville'], 'agency' => $this->libreville],
         ];
 
         foreach ($recipients as $r) {
@@ -197,7 +223,10 @@ class DemoDataSeeder extends Seeder
             }
             $this->recipientProfiles[$r['email']] = Profile::updateOrCreate(
                 ['email' => $r['email']],
-                ['first_name' => $r['first'], 'last_name' => $r['last'], 'phone' => $r['phone'], 'agency_id' => $r['agency']->id, 'is_active' => true, 'is_staff' => false, 'is_client' => false]
+                array_merge(
+                    ['first_name' => $r['first'], 'last_name' => $r['last'], 'phone' => $r['phone'], 'address' => $r['address'], 'agency_id' => $r['agency']->id, 'is_active' => true, 'is_staff' => false, 'is_client' => false],
+                    $this->locate(...$r['city'])
+                )
             );
         }
     }
@@ -216,10 +245,10 @@ class DemoDataSeeder extends Seeder
         }
 
         $books = [
-            ['owner' => $client1Profile->id, 'contact_email' => 'papa.kalala@gmail.com', 'alias' => 'Papa', 'is_default' => true],
-            ['owner' => $client1Profile->id, 'contact_email' => 'soeur.mwamba@gmail.com', 'alias' => 'Ma sœur', 'is_default' => false],
-            ['owner' => $client2Profile->id, 'contact_email' => 'maman.ngoy@gmail.com', 'alias' => 'Maman', 'is_default' => true],
-            ['owner' => $client2Profile->id, 'contact_email' => 'cousin.kabongo@gmail.com', 'alias' => 'Cousin', 'is_default' => false],
+            ['owner' => $client1Profile->id, 'contact_email' => 'jp.nze@gmail.com', 'alias' => 'Papa', 'is_default' => true],
+            ['owner' => $client1Profile->id, 'contact_email' => 'sylvie.mintsa@gmail.com', 'alias' => 'Ma sœur', 'is_default' => false],
+            ['owner' => $client2Profile->id, 'contact_email' => 'pauline.ondo@gmail.com', 'alias' => 'Maman', 'is_default' => true],
+            ['owner' => $client2Profile->id, 'contact_email' => 'kevin.ndong@gmail.com', 'alias' => 'Cousin', 'is_default' => false],
         ];
 
         foreach ($books as $b) {
@@ -239,19 +268,20 @@ class DemoDataSeeder extends Seeder
     {
         $this->command?->info('Pré-alertes…');
 
-        $locker1 = Locker::where('code', 'MRP-KIN-0001')->first();
-        $locker2 = Locker::where('code', 'MRP-KIN-0002')->first();
-        $locker3 = Locker::where('code', 'MRP-BXL-0001')->first();
+        $locker1 = Locker::where('code', 'KTD-LBV-0001')->first();
+        $locker2 = Locker::where('code', 'KTD-LBV-0002')->first();
+        $locker3 = Locker::where('code', 'KTD-POG-0001')->first();
 
+        // Valeurs déclarées telles qu'indiquées sur la facture du marchand (devise d'achat).
         $preAlerts = [
             ['reference_code' => 'ASN-0001', 'user_id' => $this->client1->id, 'locker_id' => $locker1?->id, 'status' => ShipmentStatus::PendingDropOff, 'merchant_name' => 'Amazon', 'vendor_tracking_number' => 'TBA302456789', 'carrier_name' => 'DHL', 'description' => 'MacBook Air M3 commandé sur Amazon.fr', 'declared_value' => 1299.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 2.5, 'purchase_date' => now()->subDays(8), 'estimated_arrival_date' => now()->addDays(5)],
             ['reference_code' => 'ASN-0002', 'user_id' => $this->client1->id, 'locker_id' => $locker1?->id, 'status' => ShipmentStatus::ReceivedAtHub, 'merchant_name' => 'Apple', 'vendor_tracking_number' => '1Z999AA10123456784', 'carrier_name' => 'UPS', 'description' => 'iPhone 16 Pro Max 256GB', 'declared_value' => 1199.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 0.5, 'purchase_date' => now()->subDays(15), 'estimated_arrival_date' => now()->subDays(2)],
-            ['reference_code' => 'ASN-0003', 'user_id' => $this->client2->id, 'locker_id' => $locker2?->id, 'status' => ShipmentStatus::PendingDropOff, 'merchant_name' => 'Nike', 'vendor_tracking_number' => '420221019205590020113', 'carrier_name' => 'Bpost', 'description' => 'Nike Air Force 1 x2 paires', 'declared_value' => 220.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 2.0, 'purchase_date' => now()->subDays(5), 'estimated_arrival_date' => now()->addDays(3)],
-            ['reference_code' => 'ASN-0004', 'user_id' => $this->client3->id, 'locker_id' => $locker3?->id, 'status' => ShipmentStatus::ReceivedAtHub, 'merchant_name' => 'Decathlon', 'vendor_tracking_number' => 'LP123456789BE', 'carrier_name' => 'Bpost', 'description' => 'Vélo d\'appartement pliable', 'declared_value' => 349.99, 'value_currency' => 'EUR', 'declared_weight_kg' => 22.0, 'purchase_date' => now()->subDays(12), 'estimated_arrival_date' => now()->subDays(1)],
+            ['reference_code' => 'ASN-0003', 'user_id' => $this->client2->id, 'locker_id' => $locker2?->id, 'status' => ShipmentStatus::PendingDropOff, 'merchant_name' => 'Nike', 'vendor_tracking_number' => '420221019205590020113', 'carrier_name' => 'Colissimo', 'description' => 'Nike Air Force 1 x2 paires', 'declared_value' => 220.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 2.0, 'purchase_date' => now()->subDays(5), 'estimated_arrival_date' => now()->addDays(3)],
+            ['reference_code' => 'ASN-0004', 'user_id' => $this->client3->id, 'locker_id' => $locker3?->id, 'status' => ShipmentStatus::ReceivedAtHub, 'merchant_name' => 'Decathlon', 'vendor_tracking_number' => 'LP123456789FR', 'carrier_name' => 'Colissimo', 'description' => 'Vélo d\'appartement pliable', 'declared_value' => 349.99, 'value_currency' => 'EUR', 'declared_weight_kg' => 22.0, 'purchase_date' => now()->subDays(12), 'estimated_arrival_date' => now()->subDays(1)],
             ['reference_code' => 'ASN-0005', 'user_id' => $this->client1->id, 'locker_id' => $locker1?->id, 'status' => ShipmentStatus::Delivered, 'merchant_name' => 'Sephora', 'vendor_tracking_number' => 'FR9876543210', 'carrier_name' => 'Colissimo', 'description' => 'Coffret parfums Dior', 'declared_value' => 180.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 1.2, 'purchase_date' => now()->subDays(45), 'estimated_arrival_date' => now()->subDays(30)],
             ['reference_code' => 'ASN-0006', 'user_id' => $this->client2->id, 'locker_id' => $locker2?->id, 'status' => ShipmentStatus::InTransit, 'merchant_name' => 'AliExpress', 'vendor_tracking_number' => 'LY123456789CN', 'carrier_name' => 'China Post', 'description' => 'Lot accessoires Samsung Galaxy', 'declared_value' => 45.00, 'value_currency' => 'USD', 'declared_weight_kg' => 0.3, 'purchase_date' => now()->subDays(20), 'estimated_arrival_date' => now()->addDays(10)],
-            ['reference_code' => 'ASN-0007', 'user_id' => $this->extraClients['marie.lukusa@monrespro.local']?->id, 'locker_id' => Locker::where('code', 'MRP-KIN-0003')->first()?->id, 'status' => ShipmentStatus::PendingDropOff, 'merchant_name' => 'Zara', 'vendor_tracking_number' => 'ZRA20260501001', 'carrier_name' => 'DPD', 'description' => 'Vêtements collection été 2026', 'declared_value' => 150.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 3.0, 'purchase_date' => now()->subDays(3), 'estimated_arrival_date' => now()->addDays(7)],
-            ['reference_code' => 'ASN-0008', 'user_id' => $this->extraClients['samuel.kib@monrespro.local']?->id, 'locker_id' => Locker::where('code', 'MRP-KIN-0004')->first()?->id, 'status' => ShipmentStatus::Expired, 'merchant_name' => 'eBay', 'vendor_tracking_number' => null, 'carrier_name' => null, 'description' => 'Pièce détachée BMW (non déposé)', 'declared_value' => 85.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 4.0, 'purchase_date' => now()->subDays(60), 'estimated_arrival_date' => now()->subDays(50)],
+            ['reference_code' => 'ASN-0007', 'user_id' => $this->extraClients['aurelie.mba@kotinda.local']?->id, 'locker_id' => Locker::where('code', 'KTD-LBV-0003')->first()?->id, 'status' => ShipmentStatus::PendingDropOff, 'merchant_name' => 'Zara', 'vendor_tracking_number' => 'ZRA20260501001', 'carrier_name' => 'DPD', 'description' => 'Vêtements collection été 2026', 'declared_value' => 150.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 3.0, 'purchase_date' => now()->subDays(3), 'estimated_arrival_date' => now()->addDays(7)],
+            ['reference_code' => 'ASN-0008', 'user_id' => $this->extraClients['fabrice.nguema@kotinda.local']?->id, 'locker_id' => Locker::where('code', 'KTD-LBV-0004')->first()?->id, 'status' => ShipmentStatus::Expired, 'merchant_name' => 'eBay', 'vendor_tracking_number' => null, 'carrier_name' => null, 'description' => 'Pièce détachée Toyota Land Cruiser (non déposée)', 'declared_value' => 85.00, 'value_currency' => 'EUR', 'declared_weight_kg' => 4.0, 'purchase_date' => now()->subDays(60), 'estimated_arrival_date' => now()->subDays(50)],
         ];
 
         foreach ($preAlerts as $data) {
@@ -265,16 +295,17 @@ class DemoDataSeeder extends Seeder
     {
         $this->command?->info('Colis clients…');
 
-        $locker1 = Locker::where('code', 'MRP-KIN-0001')->first();
-        $locker2 = Locker::where('code', 'MRP-KIN-0002')->first();
+        $locker1 = Locker::where('code', 'KTD-LBV-0001')->first();
+        $locker2 = Locker::where('code', 'KTD-LBV-0002')->first();
         $preAlert2 = PreAlert::where('reference_code', 'ASN-0002')->first();
         $preAlert5 = PreAlert::where('reference_code', 'ASN-0005')->first();
 
+        // Montants en XAF (valeur convertie au taux fixe 1 EUR = 655,957 XAF, fret au tarif Paris → Libreville).
         $packages = [
-            ['reference_code' => 'PKG-0001', 'user_id' => $this->client1->id, 'agency_id' => $this->kinshasa->id, 'locker_id' => $locker1?->id, 'pre_alert_id' => $preAlert2?->id, 'status' => ShipmentStatus::ReceivedAtHub, 'description' => 'iPhone 16 Pro Max 256GB', 'merchant_name' => 'Apple', 'weight_kg' => 0.480, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 8, 'declared_value' => 1199.00, 'value_currency' => 'EUR', 'received_at' => now()->subDays(2), 'received_by' => $this->operator->id, 'condition_notes' => 'Emballage intact, scellé d\'origine.'],
-            ['reference_code' => 'PKG-0002', 'user_id' => $this->client1->id, 'agency_id' => $this->kinshasa->id, 'locker_id' => $locker1?->id, 'pre_alert_id' => $preAlert5?->id, 'status' => ShipmentStatus::Delivered, 'description' => 'Coffret parfums Dior', 'merchant_name' => 'Sephora', 'weight_kg' => 1.100, 'length_cm' => 30, 'width_cm' => 25, 'height_cm' => 12, 'declared_value' => 180.00, 'value_currency' => 'EUR', 'shipping_cost' => 27.00, 'total_cost' => 207.00, 'received_at' => now()->subDays(30), 'received_by' => $this->operator->id],
-            ['reference_code' => 'PKG-0003', 'user_id' => $this->client2->id, 'agency_id' => $this->kinshasa->id, 'locker_id' => $locker2?->id, 'status' => ShipmentStatus::ReceivedAtHub, 'description' => 'Chaussures Nike Air Force 1', 'merchant_name' => 'Nike', 'weight_kg' => 1.800, 'length_cm' => 35, 'width_cm' => 25, 'height_cm' => 15, 'declared_value' => 110.00, 'value_currency' => 'EUR', 'received_at' => now()->subDays(1), 'received_by' => $this->operator->id],
-            ['reference_code' => 'PKG-0004', 'user_id' => $this->client3->id, 'agency_id' => $this->bruxelles?->id, 'locker_id' => Locker::where('code', 'MRP-BXL-0001')->first()?->id, 'status' => ShipmentStatus::ReadyForDispatch, 'description' => 'Vélo d\'appartement pliable', 'merchant_name' => 'Decathlon', 'weight_kg' => 21.500, 'length_cm' => 120, 'width_cm' => 45, 'height_cm' => 60, 'declared_value' => 349.99, 'value_currency' => 'EUR', 'shipping_cost' => 322.50, 'total_cost' => 672.49, 'received_at' => now()->subDays(1), 'received_by' => $this->adminBxl->id],
+            ['reference_code' => 'PKG-0001', 'user_id' => $this->client1->id, 'agency_id' => $this->paris?->id ?? $this->libreville->id, 'locker_id' => $locker1?->id, 'pre_alert_id' => $preAlert2?->id, 'status' => ShipmentStatus::ReceivedAtHub, 'description' => 'iPhone 16 Pro Max 256GB', 'merchant_name' => 'Apple', 'weight_kg' => 0.480, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 8, 'declared_value' => 786500, 'value_currency' => 'XAF', 'received_at' => now()->subDays(2), 'received_by' => $this->adminPar->id, 'condition_notes' => 'Emballage intact, scellé d\'origine.'],
+            ['reference_code' => 'PKG-0002', 'user_id' => $this->client1->id, 'agency_id' => $this->paris?->id ?? $this->libreville->id, 'locker_id' => $locker1?->id, 'pre_alert_id' => $preAlert5?->id, 'status' => ShipmentStatus::Delivered, 'description' => 'Coffret parfums Dior', 'merchant_name' => 'Sephora', 'weight_kg' => 1.100, 'length_cm' => 30, 'width_cm' => 25, 'height_cm' => 12, 'declared_value' => 118100, 'value_currency' => 'XAF', 'shipping_cost' => 17800, 'total_cost' => 135900, 'received_at' => now()->subDays(30), 'received_by' => $this->adminPar->id],
+            ['reference_code' => 'PKG-0003', 'user_id' => $this->client2->id, 'agency_id' => $this->paris?->id ?? $this->libreville->id, 'locker_id' => $locker2?->id, 'status' => ShipmentStatus::ReceivedAtHub, 'description' => 'Chaussures Nike Air Force 1', 'merchant_name' => 'Nike', 'weight_kg' => 1.800, 'length_cm' => 35, 'width_cm' => 25, 'height_cm' => 15, 'declared_value' => 72200, 'value_currency' => 'XAF', 'received_at' => now()->subDays(1), 'received_by' => $this->adminPar->id],
+            ['reference_code' => 'PKG-0004', 'user_id' => $this->client3->id, 'agency_id' => $this->paris?->id ?? $this->libreville->id, 'locker_id' => Locker::where('code', 'KTD-POG-0001')->first()?->id, 'status' => ShipmentStatus::ReadyForDispatch, 'description' => 'Vélo d\'appartement pliable', 'merchant_name' => 'Decathlon', 'weight_kg' => 21.500, 'length_cm' => 120, 'width_cm' => 45, 'height_cm' => 60, 'declared_value' => 229600, 'value_currency' => 'XAF', 'shipping_cost' => 75250, 'total_cost' => 304850, 'received_at' => now()->subDays(1), 'received_by' => $this->adminPar->id],
         ];
 
         foreach ($packages as $data) {
@@ -288,10 +319,11 @@ class DemoDataSeeder extends Seeder
     {
         $this->command?->info('Expéditions, items et logs…');
 
-        $hubBxl = Hub::where('code', 'HUB-BXL')->first();
-        $hubKin = Hub::where('code', 'HUB-KIN')->first();
         $hubPar = Hub::where('code', 'HUB-PAR')->first();
         $hubGz = Hub::where('code', 'HUB-GZ')->first();
+        $hubDxb = Hub::where('code', 'HUB-DXB')->first();
+        $hubLbv = Hub::where('code', 'HUB-LBV')->first();
+        $hubPog = Hub::where('code', 'HUB-POG')->first();
 
         $catElec = ArticleCategory::where('name', 'like', 'Électronique%')->first();
         $catVet = ArticleCategory::where('name', 'like', 'Vêtements%')->first();
@@ -303,105 +335,107 @@ class DemoDataSeeder extends Seeder
 
         $senderProfile1 = $this->client1->profile;
         $senderProfile2 = $this->client2->profile;
-        $senderProfile3 = $this->client3->profile;
-        $recipPapa = $this->recipientProfiles['papa.kalala@gmail.com'] ?? null;
-        $recipMaman = $this->recipientProfiles['maman.ngoy@gmail.com'] ?? null;
-        $recipTonton = $this->recipientProfiles['tonton.ilunga@gmail.com'] ?? null;
-        $recipSoeur = $this->recipientProfiles['soeur.mwamba@gmail.com'] ?? null;
+        $senderMurielle = $this->extraClients['murielle.ndong@kotinda.local']?->profile;
+        $senderLandry = $this->extraClients['landry.obiang@kotinda.local']?->profile;
+        $recipPapa = $this->recipientProfiles['jp.nze@gmail.com'] ?? null;
+        $recipMaman = $this->recipientProfiles['pauline.ondo@gmail.com'] ?? null;
+        $recipTonton = $this->recipientProfiles['gaston.moussavou@gmail.com'] ?? null;
+        $recipSoeur = $this->recipientProfiles['sylvie.mintsa@gmail.com'] ?? null;
 
+        // Prix = poids taxable × tarif de la ligne (FCFA/kg) ; valeurs déclarées converties en XAF.
         $shipmentData = [
-            // 1. Livré — Bruxelles → Kinshasa (fret aérien) — il y a 60 jours
+            // 1. Livré — Paris → Libreville (fret aérien) — il y a 60 jours
             [
                 'tracking' => 'EXP2026030001', 'doc' => 'EXP6379850001',
-                'sender' => $senderProfile3, 'recipient' => $recipPapa,
-                'creator' => $this->adminBxl, 'agency' => $this->bruxelles,
-                'origin' => $this->countryBE, 'dest' => $this->countryCD,
+                'sender' => $senderMurielle ?? $senderProfile1, 'recipient' => $recipPapa,
+                'creator' => $this->adminPar, 'agency' => $this->paris,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::Delivered, 'flow' => 'standard',
-                'hub' => $hubKin, 'weight' => 3.55, 'vol_w' => 4.0,
+                'hub' => $hubLbv, 'weight' => 3.55, 'vol_w' => 4.0,
                 'l' => 40, 'w' => 30, 'h' => 20,
-                'value' => 450.00, 'currency' => 'USD', 'price' => 53.25,
-                'payment_status' => 'paid', 'amount_paid' => 53.25, 'paid_at' => now()->subDays(58),
+                'value' => 295200, 'currency' => 'XAF', 'price' => 35600,
+                'payment_status' => 'paid', 'amount_paid' => 35600, 'paid_at' => now()->subDays(58),
                 'items' => [
-                    ['desc' => 'Vêtements divers', 'qty' => 5, 'wt' => 2.5, 'val' => 300, 'cat' => $catVet],
-                    ['desc' => 'Chaussures Nike', 'qty' => 2, 'wt' => 1.05, 'val' => 150, 'cat' => $catVet],
+                    ['desc' => 'Vêtements divers', 'qty' => 5, 'wt' => 2.5, 'val' => 196800, 'cat' => $catVet],
+                    ['desc' => 'Chaussures Nike', 'qty' => 2, 'wt' => 1.05, 'val' => 98400, 'cat' => $catVet],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 65],
-                    ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Bruxelles', 'days_ago' => 63],
+                    ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Paris', 'days_ago' => 63],
                     ['status' => ShipmentStatus::ReadyForDispatch, 'title' => 'Prêt à l\'expédition', 'days_ago' => 62],
-                    ['status' => ShipmentStatus::InTransit, 'title' => 'En transit BE → CD', 'days_ago' => 61],
-                    ['status' => ShipmentStatus::CustomsHold, 'title' => 'Dédouanement en cours', 'days_ago' => 58],
-                    ['status' => ShipmentStatus::ArrivedAtDestination, 'title' => 'Arrivé à Kinshasa', 'days_ago' => 57],
+                    ['status' => ShipmentStatus::InTransit, 'title' => 'En transit FR → GA', 'days_ago' => 61],
+                    ['status' => ShipmentStatus::CustomsHold, 'title' => 'Dédouanement à l\'aéroport Léon-Mba', 'days_ago' => 58],
+                    ['status' => ShipmentStatus::ArrivedAtDestination, 'title' => 'Arrivé à Libreville', 'days_ago' => 57],
                     ['status' => ShipmentStatus::Delivered, 'title' => 'Livré au destinataire', 'days_ago' => 55],
                 ],
                 'created_ago' => 65,
             ],
-            // 2. En transit — France → RDC (fret aérien)
+            // 2. En transit — France → Gabon (fret aérien +10 kg)
             [
                 'tracking' => 'EXP2026040002', 'doc' => 'EXP6379850002',
                 'sender' => $senderProfile1, 'recipient' => $recipMaman,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryFR, 'dest' => $this->countryCD,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::InTransit, 'flow' => 'standard',
                 'hub' => $hubPar, 'weight' => 8.2, 'vol_w' => 12.0,
                 'l' => 60, 'w' => 40, 'h' => 25,
-                'value' => 850.00, 'currency' => 'EUR', 'price' => 180.00,
-                'payment_status' => 'paid', 'amount_paid' => 180.00, 'paid_at' => now()->subDays(8),
+                'value' => 557600, 'currency' => 'XAF', 'price' => 90000,
+                'payment_status' => 'paid', 'amount_paid' => 90000, 'paid_at' => now()->subDays(8),
                 'items' => [
-                    ['desc' => 'Laptop HP Pavilion 15"', 'qty' => 1, 'wt' => 2.1, 'val' => 650, 'cat' => $catElec],
-                    ['desc' => 'Souris + clavier sans fil Logitech', 'qty' => 1, 'wt' => 0.8, 'val' => 80, 'cat' => $catElec],
-                    ['desc' => 'Sac à dos laptop Samsonite', 'qty' => 1, 'wt' => 1.2, 'val' => 120, 'cat' => $catVet],
+                    ['desc' => 'Laptop HP Pavilion 15"', 'qty' => 1, 'wt' => 2.1, 'val' => 426400, 'cat' => $catElec],
+                    ['desc' => 'Souris + clavier sans fil Logitech', 'qty' => 1, 'wt' => 0.8, 'val' => 52500, 'cat' => $catElec],
+                    ['desc' => 'Sac à dos laptop Samsonite', 'qty' => 1, 'wt' => 1.2, 'val' => 78700, 'cat' => $catVet],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 12],
                     ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Paris', 'days_ago' => 10],
                     ['status' => ShipmentStatus::ReadyForDispatch, 'title' => 'Prêt à l\'expédition', 'days_ago' => 9],
-                    ['status' => ShipmentStatus::InTransit, 'title' => 'En transit FR → CD', 'days_ago' => 7],
+                    ['status' => ShipmentStatus::InTransit, 'title' => 'En transit FR → GA', 'days_ago' => 7],
                 ],
                 'created_ago' => 12,
             ],
-            // 3. En douane — Chine → RDC (maritime)
+            // 3. En douane — Chine → Gabon (maritime, groupage)
             [
                 'tracking' => 'EXP2026040003', 'doc' => 'EXP6379850003',
                 'sender' => $senderProfile2, 'recipient' => $recipTonton,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryCN, 'dest' => $this->countryCD,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryCN, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::CustomsHold, 'flow' => 'standard',
                 'hub' => $hubGz, 'weight' => 120.0, 'vol_w' => 200.0,
                 'l' => 150, 'w' => 100, 'h' => 80,
-                'value' => 3500.00, 'currency' => 'USD', 'price' => 1440.00,
-                'payment_status' => 'partial', 'amount_paid' => 800.00, 'paid_at' => now()->subDays(30),
+                'value' => 2100000, 'currency' => 'XAF', 'price' => 500000,
+                'payment_status' => 'partial', 'amount_paid' => 250000, 'paid_at' => now()->subDays(30),
                 'items' => [
-                    ['desc' => 'Groupe électrogène 5kVA', 'qty' => 1, 'wt' => 80, 'val' => 2200, 'cat' => $catAuto],
-                    ['desc' => 'Pièces de rechange groupe', 'qty' => 1, 'wt' => 15, 'val' => 500, 'cat' => $catAuto],
-                    ['desc' => 'Outils atelier complet', 'qty' => 1, 'wt' => 25, 'val' => 800, 'cat' => $catAuto],
+                    ['desc' => 'Groupe électrogène 5kVA', 'qty' => 1, 'wt' => 80, 'val' => 1320000, 'cat' => $catAuto],
+                    ['desc' => 'Pièces de rechange groupe', 'qty' => 1, 'wt' => 15, 'val' => 300000, 'cat' => $catAuto],
+                    ['desc' => 'Outils atelier complet', 'qty' => 1, 'wt' => 25, 'val' => 480000, 'cat' => $catAuto],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 45],
                     ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Guangzhou', 'days_ago' => 42],
-                    ['status' => ShipmentStatus::InTransit, 'title' => 'Départ maritime GZ → Matadi', 'days_ago' => 38],
-                    ['status' => ShipmentStatus::CustomsHold, 'title' => 'Blocage douane Matadi', 'days_ago' => 5],
+                    ['status' => ShipmentStatus::InTransit, 'title' => 'Départ maritime Guangzhou → Owendo', 'days_ago' => 38],
+                    ['status' => ShipmentStatus::CustomsHold, 'title' => 'Blocage douane au port d\'Owendo', 'days_ago' => 5],
                 ],
                 'created_ago' => 45,
             ],
-            // 4. Prêt à l'expédition — BE → CD
+            // 4. Prêt à l'expédition — FR → GA (hub Paris)
             [
                 'tracking' => 'EXP2026050004', 'doc' => 'EXP6379850004',
-                'sender' => $senderProfile3, 'recipient' => $recipSoeur,
-                'creator' => $this->adminBxl, 'agency' => $this->bruxelles,
-                'origin' => $this->countryBE, 'dest' => $this->countryCD,
+                'sender' => $senderLandry ?? $senderProfile1, 'recipient' => $recipSoeur,
+                'creator' => $this->adminPar, 'agency' => $this->paris,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::ReadyForDispatch, 'flow' => 'standard',
-                'hub' => $hubBxl, 'weight' => 5.0, 'vol_w' => 6.5,
+                'hub' => $hubPar, 'weight' => 5.0, 'vol_w' => 6.5,
                 'l' => 50, 'w' => 35, 'h' => 22,
-                'value' => 320.00, 'currency' => 'EUR', 'price' => 75.00,
-                'payment_status' => 'paid', 'amount_paid' => 75.00, 'paid_at' => now()->subDays(2),
+                'value' => 209900, 'currency' => 'XAF', 'price' => 57850,
+                'payment_status' => 'paid', 'amount_paid' => 57850, 'paid_at' => now()->subDays(2),
                 'items' => [
-                    ['desc' => 'Cosmétiques et soins L\'Oréal', 'qty' => 8, 'wt' => 3.5, 'val' => 220, 'cat' => $catBeaute],
-                    ['desc' => 'Bijoux fantaisie Pandora', 'qty' => 3, 'wt' => 0.3, 'val' => 100, 'cat' => $catBeaute],
+                    ['desc' => 'Cosmétiques et soins L\'Oréal', 'qty' => 8, 'wt' => 3.5, 'val' => 144300, 'cat' => $catBeaute],
+                    ['desc' => 'Bijoux fantaisie Pandora', 'qty' => 3, 'wt' => 0.3, 'val' => 65600, 'cat' => $catBeaute],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 5],
-                    ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Bruxelles', 'days_ago' => 3],
+                    ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Paris', 'days_ago' => 3],
                     ['status' => ShipmentStatus::ReadyForDispatch, 'title' => 'Prêt à l\'expédition', 'days_ago' => 1],
                 ],
                 'created_ago' => 5,
@@ -410,16 +444,16 @@ class DemoDataSeeder extends Seeder
             [
                 'tracking' => 'EXP2026050005', 'doc' => 'EXP6379850005',
                 'sender' => $senderProfile1, 'recipient' => $recipPapa,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryBE, 'dest' => $this->countryCD,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::PendingDropOff, 'flow' => 'standard',
                 'hub' => null, 'weight' => 1.5, 'vol_w' => null,
                 'l' => 30, 'w' => 22, 'h' => 5,
-                'value' => 50.00, 'currency' => 'EUR', 'price' => 22.50,
+                'value' => 32800, 'currency' => 'XAF', 'price' => 13350,
                 'payment_status' => 'unpaid', 'amount_paid' => 0, 'paid_at' => null,
                 'items' => [
                     ['desc' => 'Documents administratifs', 'qty' => 1, 'wt' => 0.5, 'val' => 0, 'cat' => $catDoc],
-                    ['desc' => 'Photos de famille encadrées', 'qty' => 3, 'wt' => 1.0, 'val' => 50, 'cat' => $catMaison],
+                    ['desc' => 'Photos de famille encadrées', 'qty' => 3, 'wt' => 1.0, 'val' => 32800, 'cat' => $catMaison],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 1],
@@ -430,16 +464,16 @@ class DemoDataSeeder extends Seeder
             [
                 'tracking' => 'EXP2026020006', 'doc' => 'EXP6379850006',
                 'sender' => $senderProfile2, 'recipient' => $recipMaman,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryBE, 'dest' => $this->countryCD,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::Delivered, 'flow' => 'standard',
-                'hub' => $hubKin, 'weight' => 2.0, 'vol_w' => 2.5,
+                'hub' => $hubLbv, 'weight' => 2.0, 'vol_w' => 2.5,
                 'l' => 35, 'w' => 25, 'h' => 15,
-                'value' => 200.00, 'currency' => 'EUR', 'price' => 30.00,
-                'payment_status' => 'paid', 'amount_paid' => 30.00, 'paid_at' => now()->subDays(88),
+                'value' => 131200, 'currency' => 'XAF', 'price' => 22250,
+                'payment_status' => 'paid', 'amount_paid' => 22250, 'paid_at' => now()->subDays(88),
                 'items' => [
-                    ['desc' => 'Médicaments autorisés', 'qty' => 10, 'wt' => 1.5, 'val' => 150, 'cat' => $catBeaute],
-                    ['desc' => 'Compléments alimentaires', 'qty' => 3, 'wt' => 0.5, 'val' => 50, 'cat' => $catBeaute],
+                    ['desc' => 'Médicaments autorisés', 'qty' => 10, 'wt' => 1.5, 'val' => 98400, 'cat' => $catBeaute],
+                    ['desc' => 'Compléments alimentaires', 'qty' => 3, 'wt' => 0.5, 'val' => 32800, 'cat' => $catBeaute],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 95],
@@ -450,74 +484,74 @@ class DemoDataSeeder extends Seeder
                 ],
                 'created_ago' => 95,
             ],
-            // 7. Livré il y a 30 jours
+            // 7. Livré il y a 30 jours (colis type ≈ 70 000 FCFA tout compris)
             [
                 'tracking' => 'EXP2026040007', 'doc' => 'EXP6379850007',
                 'sender' => $senderProfile1, 'recipient' => $recipSoeur,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryFR, 'dest' => $this->countryCD,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::Delivered, 'flow' => 'standard',
-                'hub' => $hubKin, 'weight' => 4.2, 'vol_w' => 5.0,
+                'hub' => $hubLbv, 'weight' => 4.2, 'vol_w' => 5.0,
                 'l' => 45, 'w' => 35, 'h' => 20,
-                'value' => 380.00, 'currency' => 'EUR', 'price' => 84.00,
-                'payment_status' => 'paid', 'amount_paid' => 84.00, 'paid_at' => now()->subDays(32),
+                'value' => 249300, 'currency' => 'XAF', 'price' => 44500,
+                'payment_status' => 'paid', 'amount_paid' => 44500, 'paid_at' => now()->subDays(32),
                 'items' => [
-                    ['desc' => 'Robe de soirée Zara', 'qty' => 2, 'wt' => 1.0, 'val' => 180, 'cat' => $catVet],
-                    ['desc' => 'Sac à main Michael Kors', 'qty' => 1, 'wt' => 0.8, 'val' => 200, 'cat' => $catVet],
+                    ['desc' => 'Robe de soirée Zara', 'qty' => 2, 'wt' => 1.0, 'val' => 118100, 'cat' => $catVet],
+                    ['desc' => 'Sac à main Michael Kors', 'qty' => 1, 'wt' => 0.8, 'val' => 131200, 'cat' => $catVet],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 40],
                     ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Paris', 'days_ago' => 38],
                     ['status' => ShipmentStatus::InTransit, 'title' => 'En transit', 'days_ago' => 36],
-                    ['status' => ShipmentStatus::ArrivedAtDestination, 'title' => 'Arrivé à Kinshasa', 'days_ago' => 32],
+                    ['status' => ShipmentStatus::ArrivedAtDestination, 'title' => 'Arrivé à Libreville', 'days_ago' => 32],
                     ['status' => ShipmentStatus::Delivered, 'title' => 'Livré', 'days_ago' => 30],
                 ],
                 'created_ago' => 40,
             ],
-            // 8. Arrivé à destination — en attente livraison
+            // 8. Arrivé à destination — en attente livraison (USA → Gabon)
             [
                 'tracking' => 'EXP2026050008', 'doc' => 'EXP6379850008',
                 'sender' => $senderProfile1, 'recipient' => $recipPapa,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryUS, 'dest' => $this->countryCD,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryUS, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::ArrivedAtDestination, 'flow' => 'standard',
-                'hub' => $hubKin, 'weight' => 6.0, 'vol_w' => 8.0,
+                'hub' => $hubLbv, 'weight' => 6.0, 'vol_w' => 8.0,
                 'l' => 55, 'w' => 40, 'h' => 30,
-                'value' => 520.00, 'currency' => 'USD', 'price' => 180.00,
-                'payment_status' => 'paid', 'amount_paid' => 180.00, 'paid_at' => now()->subDays(15),
+                'value' => 312000, 'currency' => 'XAF', 'price' => 108000,
+                'payment_status' => 'paid', 'amount_paid' => 108000, 'paid_at' => now()->subDays(15),
                 'items' => [
-                    ['desc' => 'Tablette Samsung Galaxy Tab S9', 'qty' => 1, 'wt' => 0.6, 'val' => 350, 'cat' => $catElec],
-                    ['desc' => 'Étui + stylet Samsung', 'qty' => 1, 'wt' => 0.3, 'val' => 70, 'cat' => $catElec],
-                    ['desc' => 'Casque Sony WH-1000XM5', 'qty' => 1, 'wt' => 0.3, 'val' => 100, 'cat' => $catElec],
+                    ['desc' => 'Tablette Samsung Galaxy Tab S9', 'qty' => 1, 'wt' => 0.6, 'val' => 210000, 'cat' => $catElec],
+                    ['desc' => 'Étui + stylet Samsung', 'qty' => 1, 'wt' => 0.3, 'val' => 42000, 'cat' => $catElec],
+                    ['desc' => 'Casque Sony WH-1000XM5', 'qty' => 1, 'wt' => 0.3, 'val' => 60000, 'cat' => $catElec],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 18],
                     ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Miami', 'days_ago' => 16],
-                    ['status' => ShipmentStatus::InTransit, 'title' => 'En transit US → CD', 'days_ago' => 14],
+                    ['status' => ShipmentStatus::InTransit, 'title' => 'En transit US → GA', 'days_ago' => 14],
                     ['status' => ShipmentStatus::CustomsHold, 'title' => 'Dédouanement', 'days_ago' => 5],
-                    ['status' => ShipmentStatus::ArrivedAtDestination, 'title' => 'Arrivé à Kinshasa', 'days_ago' => 3],
+                    ['status' => ShipmentStatus::ArrivedAtDestination, 'title' => 'Arrivé à Libreville', 'days_ago' => 3],
                 ],
                 'created_ago' => 18,
             ],
-            // 9. Échec livraison
+            // 9. Échec livraison — Dubaï → Port-Gentil
             [
                 'tracking' => 'EXP2026050009', 'doc' => 'EXP6379850009',
                 'sender' => $senderProfile2, 'recipient' => $recipTonton,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryBE, 'dest' => $this->countryCD,
+                'creator' => $this->operator, 'agency' => $this->portGentil ?? $this->libreville,
+                'origin' => $this->countryAE, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::DeliveryFailed, 'flow' => 'standard',
-                'hub' => $hubKin, 'weight' => 2.8, 'vol_w' => 3.5,
+                'hub' => $hubPog, 'weight' => 2.8, 'vol_w' => 3.5,
                 'l' => 40, 'w' => 30, 'h' => 20,
-                'value' => 290.00, 'currency' => 'EUR', 'price' => 42.00,
-                'payment_status' => 'paid', 'amount_paid' => 42.00, 'paid_at' => now()->subDays(10),
+                'value' => 190200, 'currency' => 'XAF', 'price' => 27650,
+                'payment_status' => 'paid', 'amount_paid' => 27650, 'paid_at' => now()->subDays(10),
                 'items' => [
-                    ['desc' => 'Équipement de sport Decathlon', 'qty' => 3, 'wt' => 2.8, 'val' => 290, 'cat' => $catSport],
+                    ['desc' => 'Équipement de sport', 'qty' => 3, 'wt' => 2.8, 'val' => 190200, 'cat' => $catSport],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 15],
-                    ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné', 'days_ago' => 13],
-                    ['status' => ShipmentStatus::InTransit, 'title' => 'En transit', 'days_ago' => 11],
-                    ['status' => ShipmentStatus::ArrivedAtDestination, 'title' => 'Arrivé', 'days_ago' => 5],
+                    ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Dubaï', 'days_ago' => 13],
+                    ['status' => ShipmentStatus::InTransit, 'title' => 'En transit AE → GA', 'days_ago' => 11],
+                    ['status' => ShipmentStatus::ArrivedAtDestination, 'title' => 'Arrivé à Port-Gentil', 'days_ago' => 5],
                     ['status' => ShipmentStatus::DeliveryFailed, 'title' => 'Destinataire absent', 'days_ago' => 3],
                 ],
                 'created_ago' => 15,
@@ -526,15 +560,15 @@ class DemoDataSeeder extends Seeder
             [
                 'tracking' => 'EXP2026050010', 'doc' => 'EXP6379850010',
                 'sender' => $senderProfile1, 'recipient' => $recipPapa,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryBE, 'dest' => $this->countryCD,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::Cancelled, 'flow' => 'standard',
                 'hub' => null, 'weight' => 1.0, 'vol_w' => null,
                 'l' => 25, 'w' => 20, 'h' => 10,
-                'value' => 80.00, 'currency' => 'EUR', 'price' => 15.00,
+                'value' => 52500, 'currency' => 'XAF', 'price' => 8900,
                 'payment_status' => 'unpaid', 'amount_paid' => 0, 'paid_at' => null,
                 'items' => [
-                    ['desc' => 'Livre annulé', 'qty' => 1, 'wt' => 1.0, 'val' => 80, 'cat' => $catDoc],
+                    ['desc' => 'Livre annulé', 'qty' => 1, 'wt' => 1.0, 'val' => 52500, 'cat' => $catDoc],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 20],
@@ -545,37 +579,37 @@ class DemoDataSeeder extends Seeder
             // 11. Réceptionné au hub — client extra
             [
                 'tracking' => 'EXP2026050011', 'doc' => 'EXP6379850011',
-                'sender' => $this->extraClients['marie.lukusa@monrespro.local']?->profile, 'recipient' => $recipPapa,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryBE, 'dest' => $this->countryCD,
+                'sender' => $this->extraClients['aurelie.mba@kotinda.local']?->profile, 'recipient' => $recipPapa,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::ReceivedAtHub, 'flow' => 'standard',
-                'hub' => $hubBxl, 'weight' => 7.5, 'vol_w' => 9.0,
+                'hub' => $hubPar, 'weight' => 7.5, 'vol_w' => 9.0,
                 'l' => 50, 'w' => 40, 'h' => 30,
-                'value' => 600.00, 'currency' => 'EUR', 'price' => 112.50,
+                'value' => 393600, 'currency' => 'XAF', 'price' => 80100,
                 'payment_status' => 'unpaid', 'amount_paid' => 0, 'paid_at' => null,
                 'items' => [
-                    ['desc' => 'Mixeur Moulinex', 'qty' => 1, 'wt' => 4.5, 'val' => 350, 'cat' => $catMaison],
-                    ['desc' => 'Set de casseroles Tefal', 'qty' => 1, 'wt' => 3.0, 'val' => 250, 'cat' => $catMaison],
+                    ['desc' => 'Mixeur Moulinex', 'qty' => 1, 'wt' => 4.5, 'val' => 229600, 'cat' => $catMaison],
+                    ['desc' => 'Set de casseroles Tefal', 'qty' => 1, 'wt' => 3.0, 'val' => 164000, 'cat' => $catMaison],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 4],
-                    ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Bruxelles', 'days_ago' => 2],
+                    ['status' => ShipmentStatus::ReceivedAtHub, 'title' => 'Réceptionné à Paris', 'days_ago' => 2],
                 ],
                 'created_ago' => 4,
             ],
             // 12. Problème signalé
             [
                 'tracking' => 'EXP2026050012', 'doc' => 'EXP6379850012',
-                'sender' => $this->extraClients['samuel.kib@monrespro.local']?->profile, 'recipient' => $recipMaman,
-                'creator' => $this->operator, 'agency' => $this->kinshasa,
-                'origin' => $this->countryFR, 'dest' => $this->countryCD,
+                'sender' => $this->extraClients['fabrice.nguema@kotinda.local']?->profile, 'recipient' => $recipMaman,
+                'creator' => $this->operator, 'agency' => $this->libreville,
+                'origin' => $this->countryFR, 'dest' => $this->countryGA,
                 'status' => ShipmentStatus::IssueReported, 'flow' => 'standard',
                 'hub' => $hubPar, 'weight' => 3.0, 'vol_w' => 3.5,
                 'l' => 40, 'w' => 30, 'h' => 15,
-                'value' => 250.00, 'currency' => 'EUR', 'price' => 60.00,
-                'payment_status' => 'paid', 'amount_paid' => 60.00, 'paid_at' => now()->subDays(8),
+                'value' => 164000, 'currency' => 'XAF', 'price' => 31150,
+                'payment_status' => 'paid', 'amount_paid' => 31150, 'paid_at' => now()->subDays(8),
                 'items' => [
-                    ['desc' => 'Vase en cristal (fragile)', 'qty' => 1, 'wt' => 3.0, 'val' => 250, 'cat' => $catMaison],
+                    ['desc' => 'Vase en cristal (fragile)', 'qty' => 1, 'wt' => 3.0, 'val' => 164000, 'cat' => $catMaison],
                 ],
                 'logs' => [
                     ['status' => ShipmentStatus::PendingDropOff, 'title' => 'Expédition créée', 'days_ago' => 10],
@@ -645,12 +679,12 @@ class DemoDataSeeder extends Seeder
 
         $regroup1 = Regroupement::updateOrCreate(
             ['batch_number' => 'GRP-2026-001'],
-            ['agency_id' => $this->bruxelles?->id, 'status' => ShipmentStatus::Delivered]
+            ['agency_id' => $this->paris?->id, 'status' => ShipmentStatus::Delivered]
         );
 
         $regroup2 = Regroupement::updateOrCreate(
             ['batch_number' => 'GRP-2026-002'],
-            ['agency_id' => $this->bruxelles?->id, 'status' => ShipmentStatus::ReadyForDispatch]
+            ['agency_id' => $this->paris?->id, 'status' => ShipmentStatus::ReadyForDispatch]
         );
 
         if ($shipment1) {
@@ -674,11 +708,11 @@ class DemoDataSeeder extends Seeder
         $shipment8 = Shipment::where('public_tracking', 'EXP2026050008')->first();
 
         $pickups = [
-            ['user_id' => $this->client1->id, 'agency_id' => $this->kinshasa->id, 'shipment_id' => $shipment8?->id, 'status' => PickupStatus::Completed, 'assigned_driver_id' => $this->driver->id, 'latitude' => -4.3250, 'longitude' => 15.3100, 'address_text' => 'Avenue Lumumba 45, Gombe, Kinshasa', 'requested_window' => 'Matin 8h-12h', 'completed_at' => now()->subDays(3), 'completion_notes' => 'Livré avec succès au bureau Gombe.'],
-            ['user_id' => $this->client2->id, 'agency_id' => $this->kinshasa->id, 'shipment_id' => null, 'status' => PickupStatus::DriverAssigned, 'assigned_driver_id' => $this->driver->id, 'latitude' => -4.3400, 'longitude' => 15.2800, 'address_text' => 'Avenue Kasa-Vubu 120, Barumbu, Kinshasa', 'requested_window' => 'Après-midi 14h-18h'],
-            ['user_id' => $this->client1->id, 'agency_id' => $this->kinshasa->id, 'shipment_id' => $shipment5?->id, 'status' => PickupStatus::Draft, 'assigned_driver_id' => null, 'latitude' => -4.3100, 'longitude' => 15.3200, 'address_text' => 'Boulevard du 30 Juin 88, Gombe, Kinshasa', 'requested_window' => 'Demain matin'],
-            ['user_id' => $this->extraClients['rachel.mbuyi@monrespro.local']?->id, 'agency_id' => $this->kinshasa->id, 'shipment_id' => null, 'status' => PickupStatus::Failed, 'assigned_driver_id' => $this->driver->id, 'latitude' => -4.3500, 'longitude' => 15.3400, 'address_text' => 'Avenue de la Libération 33, Limete', 'requested_window' => 'Hier matin', 'failure_reason' => 'Client absent, porte fermée'],
-            ['user_id' => $this->extraClients['christian.nseka@monrespro.local']?->id, 'agency_id' => $this->kinshasa->id, 'shipment_id' => null, 'status' => PickupStatus::EnRoute, 'assigned_driver_id' => $this->driver->id, 'latitude' => -4.3600, 'longitude' => 15.2900, 'address_text' => 'Quartier Matonge, Kalamu', 'requested_window' => 'Maintenant'],
+            ['user_id' => $this->client1->id, 'agency_id' => $this->libreville->id, 'shipment_id' => $shipment8?->id, 'status' => PickupStatus::Completed, 'assigned_driver_id' => $this->driver->id, 'latitude' => 0.4060, 'longitude' => 9.4370, 'address_text' => 'Rue Pierre Barro, quartier Louis, Libreville', 'requested_window' => 'Matin 8h-12h', 'completed_at' => now()->subDays(3), 'completion_notes' => 'Livré avec succès au domicile (Louis).'],
+            ['user_id' => $this->client2->id, 'agency_id' => $this->libreville->id, 'shipment_id' => null, 'status' => PickupStatus::DriverAssigned, 'assigned_driver_id' => $this->driver->id, 'latitude' => 0.5160, 'longitude' => 9.4110, 'address_text' => 'Angondjé, Akanda', 'requested_window' => 'Après-midi 14h-18h'],
+            ['user_id' => $this->client1->id, 'agency_id' => $this->libreville->id, 'shipment_id' => $shipment5?->id, 'status' => PickupStatus::Draft, 'assigned_driver_id' => null, 'latitude' => 0.3850, 'longitude' => 9.4480, 'address_text' => 'Boulevard de l\'Indépendance, Glass, Libreville', 'requested_window' => 'Demain matin'],
+            ['user_id' => $this->extraClients['nadege.mouele@kotinda.local']?->id, 'agency_id' => $this->libreville->id, 'shipment_id' => null, 'status' => PickupStatus::Failed, 'assigned_driver_id' => $this->driver->id, 'latitude' => 0.4170, 'longitude' => 9.4890, 'address_text' => 'Carrefour Nzeng-Ayong, Libreville', 'requested_window' => 'Hier matin', 'failure_reason' => 'Client absent, téléphone injoignable'],
+            ['user_id' => $this->extraClients['yannick.bongo@kotinda.local']?->id, 'agency_id' => $this->libreville->id, 'shipment_id' => null, 'status' => PickupStatus::EnRoute, 'assigned_driver_id' => $this->driver->id, 'latitude' => 0.3020, 'longitude' => 9.5010, 'address_text' => 'Owendo, cité SNI', 'requested_window' => 'Maintenant'],
         ];
 
         foreach ($pickups as $data) {
@@ -699,7 +733,7 @@ class DemoDataSeeder extends Seeder
         $invNum = 1;
         foreach ($paidShipments as $shipment) {
             $user = $shipment->creator ?? $this->client1;
-            $agency = $shipment->agency ?? $this->kinshasa;
+            $agency = $shipment->agency ?? $this->libreville;
 
             $invoice = Invoice::updateOrCreate(
                 ['shipment_id' => $shipment->id],
@@ -709,7 +743,7 @@ class DemoDataSeeder extends Seeder
                     'agency_id' => $agency->id,
                     'amount' => $shipment->calculated_price,
                     'base_amount' => $shipment->calculated_price,
-                    'currency' => $shipment->currency ?? 'USD',
+                    'currency' => $shipment->currency ?? 'XAF',
                     'status' => $shipment->payment_status === 'paid' ? 'paid' : 'partial',
                     'due_at' => $shipment->created_at->addDays(15),
                     'paid_at' => $shipment->paid_at,
@@ -719,7 +753,7 @@ class DemoDataSeeder extends Seeder
             ShipmentPayment::updateOrCreate(
                 ['shipment_id' => $shipment->id, 'amount' => $shipment->amount_paid],
                 [
-                    'payment_method' => collect(['M-Pesa', 'Orange Money', 'Virement SEPA', 'Espèces USD', 'Airtel Money'])->random(),
+                    'payment_method' => collect(['Airtel Money', 'Moov Money', 'Virement SEPA', 'Espèces FCFA', 'Carte bancaire'])->random(),
                     'reference' => 'PAY-'.strtoupper(Str::random(8)),
                     'notes' => 'Paiement reçu',
                     'recorded_by_user_id' => $this->operator->id,
@@ -730,9 +764,9 @@ class DemoDataSeeder extends Seeder
         }
 
         $extraInvoices = [
-            ['inv' => 'INV-2026-00020', 'user' => $this->client1, 'amount' => 45.00, 'status' => 'pending', 'days_ago' => 5],
-            ['inv' => 'INV-2026-00021', 'user' => $this->client2, 'amount' => 120.00, 'status' => 'overdue', 'days_ago' => 30],
-            ['inv' => 'INV-2026-00022', 'user' => $this->client3, 'amount' => 322.50, 'status' => 'pending', 'days_ago' => 2],
+            ['inv' => 'INV-2026-00020', 'user' => $this->client1, 'amount' => 45000, 'status' => 'pending', 'days_ago' => 5],
+            ['inv' => 'INV-2026-00021', 'user' => $this->client2, 'amount' => 68500, 'status' => 'overdue', 'days_ago' => 30],
+            ['inv' => 'INV-2026-00022', 'user' => $this->client3, 'amount' => 75250, 'status' => 'pending', 'days_ago' => 2],
         ];
 
         foreach ($extraInvoices as $ei) {
@@ -740,10 +774,10 @@ class DemoDataSeeder extends Seeder
                 ['invoice_number' => $ei['inv']],
                 [
                     'user_id' => $ei['user']->id,
-                    'agency_id' => $this->kinshasa->id,
+                    'agency_id' => $ei['user']->agency_id ?? $this->libreville->id,
                     'amount' => $ei['amount'],
                     'base_amount' => $ei['amount'],
-                    'currency' => 'USD',
+                    'currency' => 'XAF',
                     'status' => $ei['status'],
                     'due_at' => now()->subDays($ei['days_ago'])->addDays(15),
                     'created_at' => now()->subDays($ei['days_ago']),
@@ -774,19 +808,19 @@ class DemoDataSeeder extends Seeder
         }
 
         $extraEntries = [
-            ['type' => 'debit', 'amount' => 250.00, 'desc' => 'Achat carburant véhicule livraison', 'days_ago' => 10],
-            ['type' => 'debit', 'amount' => 1500.00, 'desc' => 'Loyer entrepôt Kinshasa – Mai 2026', 'days_ago' => 3],
-            ['type' => 'debit', 'amount' => 800.00, 'desc' => 'Salaires chauffeurs – Avril 2026', 'days_ago' => 15],
-            ['type' => 'credit', 'amount' => 350.00, 'desc' => 'Commission assistance achat – Lot Mars', 'days_ago' => 40],
-            ['type' => 'debit', 'amount' => 120.00, 'desc' => 'Fournitures bureau (emballages)', 'days_ago' => 7],
+            ['type' => 'debit', 'amount' => 150000, 'desc' => 'Achat carburant véhicules de livraison', 'days_ago' => 10],
+            ['type' => 'debit', 'amount' => 900000, 'desc' => 'Loyer entrepôt Owendo – Mai 2026', 'days_ago' => 3],
+            ['type' => 'debit', 'amount' => 480000, 'desc' => 'Salaires livreurs – Avril 2026', 'days_ago' => 15],
+            ['type' => 'credit', 'amount' => 210000, 'desc' => 'Commission assistance achat – Lot Mars', 'days_ago' => 40],
+            ['type' => 'debit', 'amount' => 72000, 'desc' => 'Fournitures bureau (emballages)', 'days_ago' => 7],
         ];
 
         foreach ($extraEntries as $entry) {
             LedgerEntry::create([
-                'agency_id' => $this->kinshasa->id,
-                'user_id' => $this->adminKin->id,
+                'agency_id' => $this->libreville->id,
+                'user_id' => $this->adminLbv->id,
                 'amount' => $entry['amount'],
-                'currency' => 'USD',
+                'currency' => 'XAF',
                 'type' => $entry['type'],
                 'description' => $entry['desc'],
                 'created_at' => now()->subDays($entry['days_ago']),
@@ -801,18 +835,18 @@ class DemoDataSeeder extends Seeder
         $this->command?->info('Réponses rapides SAV…');
 
         $replies = [
-            ['title' => 'Accusé de réception', 'body' => "Bonjour,\n\nNous avons bien reçu votre réclamation et l'avons enregistrée sous la référence {{ticket_ref}}. Un membre de notre équipe vous recontactera sous 24h.\n\nCordialement,\nÉquipe SAV Monrespro", 'category' => 'general', 'sort_order' => 1],
-            ['title' => 'Demande de preuve', 'body' => "Bonjour,\n\nPour traiter votre réclamation, nous avons besoin de photos du colis et de son contenu. Merci de les joindre à ce ticket.\n\nCordialement,\nÉquipe SAV Monrespro", 'category' => 'lost_damaged', 'sort_order' => 2],
-            ['title' => 'Retard — mise à jour', 'body' => "Bonjour,\n\nVotre colis est actuellement en transit et subit un retard dû à {{raison}}. Nous estimons la livraison sous {{delai}} jours ouvrés.\n\nNous vous prions de nous excuser pour ce désagrément.\n\nCordialement,\nÉquipe SAV Monrespro", 'category' => 'delivery_delay', 'sort_order' => 3],
-            ['title' => 'Remboursement initié', 'body' => "Bonjour,\n\nSuite à votre demande, nous avons initié un remboursement de {{montant}} {{devise}}. Le traitement prend 5-10 jours ouvrés selon votre mode de paiement.\n\nCordialement,\nÉquipe SAV Monrespro", 'category' => 'refund', 'sort_order' => 4],
-            ['title' => 'Ticket résolu', 'body' => "Bonjour,\n\nVotre réclamation a été traitée avec succès. Si vous avez d'autres questions, n'hésitez pas à nous contacter.\n\nMerci de votre confiance.\n\nCordialement,\nÉquipe SAV Monrespro", 'category' => 'general', 'sort_order' => 5],
-            ['title' => 'En attente info client', 'body' => "Bonjour,\n\nNous avons besoin d'informations complémentaires pour traiter votre demande. Pourriez-vous nous fournir {{info_requise}} ?\n\nMerci d'avance.\n\nCordialement,\nÉquipe SAV Monrespro", 'category' => 'general', 'sort_order' => 6],
+            ['title' => 'Accusé de réception', 'body' => "Bonjour,\n\nNous avons bien reçu votre réclamation et l'avons enregistrée sous la référence {{ticket_ref}}. Un membre de notre équipe vous recontactera sous 24h.\n\nCordialement,\nÉquipe SAV Kotinda", 'category' => 'general', 'sort_order' => 1],
+            ['title' => 'Demande de preuve', 'body' => "Bonjour,\n\nPour traiter votre réclamation, nous avons besoin de photos du colis et de son contenu. Merci de les joindre à ce ticket.\n\nCordialement,\nÉquipe SAV Kotinda", 'category' => 'lost_damaged', 'sort_order' => 2],
+            ['title' => 'Retard — mise à jour', 'body' => "Bonjour,\n\nVotre colis est actuellement en transit et subit un retard dû à {{raison}}. Nous estimons la livraison sous {{delai}} jours ouvrés.\n\nNous vous prions de nous excuser pour ce désagrément.\n\nCordialement,\nÉquipe SAV Kotinda", 'category' => 'delivery_delay', 'sort_order' => 3],
+            ['title' => 'Remboursement initié', 'body' => "Bonjour,\n\nSuite à votre demande, nous avons initié un remboursement de {{montant}} {{devise}}. Le traitement prend 5-10 jours ouvrés selon votre mode de paiement.\n\nCordialement,\nÉquipe SAV Kotinda", 'category' => 'refund', 'sort_order' => 4],
+            ['title' => 'Ticket résolu', 'body' => "Bonjour,\n\nVotre réclamation a été traitée avec succès. Si vous avez d'autres questions, n'hésitez pas à nous contacter.\n\nMerci de votre confiance.\n\nCordialement,\nÉquipe SAV Kotinda", 'category' => 'general', 'sort_order' => 5],
+            ['title' => 'En attente info client', 'body' => "Bonjour,\n\nNous avons besoin d'informations complémentaires pour traiter votre demande. Pourriez-vous nous fournir {{info_requise}} ?\n\nMerci d'avance.\n\nCordialement,\nÉquipe SAV Kotinda", 'category' => 'general', 'sort_order' => 6],
         ];
 
         foreach ($replies as $r) {
             SavQuickReply::updateOrCreate(
-                ['agency_id' => $this->kinshasa->id, 'title' => $r['title']],
-                array_merge($r, ['agency_id' => $this->kinshasa->id, 'is_active' => true])
+                ['agency_id' => $this->libreville->id, 'title' => $r['title']],
+                array_merge($r, ['agency_id' => $this->libreville->id, 'is_active' => true])
             );
         }
     }
@@ -827,69 +861,72 @@ class DemoDataSeeder extends Seeder
         $shipment12 = Shipment::where('public_tracking', 'EXP2026050012')->first();
         $shipment3 = Shipment::where('public_tracking', 'EXP2026040003')->first();
 
+        $fabrice = $this->extraClients['fabrice.nguema@kotinda.local'] ?? null;
+        $nadege = $this->extraClients['nadege.mouele@kotinda.local'] ?? null;
+
         $tickets = [
             [
-                'ref' => 'TKT-2026-0001', 'agency' => $this->kinshasa, 'client' => $this->client2, 'assigned' => $this->operator, 'created_by' => $this->client2,
+                'ref' => 'TKT-2026-0001', 'agency' => $this->portGentil ?? $this->libreville, 'client' => $this->client2, 'assigned' => $this->operator, 'created_by' => $this->client2,
                 'category' => SavTicketCategory::DeliveryDelay, 'priority' => SavTicketPriority::Normal, 'status' => SavTicketStatus::InProgress,
                 'channel' => 'web', 'subject' => 'Mon colis est en retard de 2 semaines',
-                'description' => "Bonjour, mon colis EXP2026050009 devait arriver il y a 2 semaines mais il n'est toujours pas là. Le tracking montre 'échec de livraison'. Quand est-ce que je vais le recevoir ?",
+                'description' => "Bonjour, mon colis EXP2026050009 devait arriver à Port-Gentil il y a 2 semaines mais il n'est toujours pas livré. Le suivi indique « échec de livraison ». Quand mon oncle va-t-il le recevoir ?",
                 'related_type' => Shipment::class, 'related_id' => $shipment9?->id,
                 'sla_deadline_at' => now()->addHours(48), 'first_response_at' => now()->subHours(2), 'days_ago' => 3,
                 'messages' => [
-                    ['user' => $this->client2, 'body' => "Bonjour, j'attends mon colis EXP2026050009 depuis 2 semaines. Le livreur n'est jamais passé. Merci de me donner une mise à jour.", 'internal' => false, 'days_ago' => 3],
-                    ['user' => $this->operator, 'body' => "Bonjour Emmanuel, nous avons vérifié votre dossier. Le livreur a tenté un passage mais personne n'était disponible à l'adresse indiquée. Nous reprogrammons la livraison pour demain matin.", 'internal' => false, 'days_ago' => 2],
-                    ['user' => $this->operator, 'body' => "Note interne : Contacter le livreur José pour confirmer la reprogrammation.", 'internal' => true, 'days_ago' => 2],
+                    ['user' => $this->client2, 'body' => "Bonjour, j'attends le colis EXP2026050009 depuis 2 semaines. Le livreur n'est jamais passé chez mon oncle à Grand Village. Merci de me donner une mise à jour.", 'internal' => false, 'days_ago' => 3],
+                    ['user' => $this->operator, 'body' => "Bonjour Ghislain, nous avons vérifié votre dossier. Le livreur s'est présenté mais personne n'était disponible à l'adresse indiquée. Nous reprogrammons la livraison pour demain matin.", 'internal' => false, 'days_ago' => 2],
+                    ['user' => $this->operator, 'body' => 'Note interne : contacter l\'agence de Port-Gentil pour confirmer la reprogrammation.', 'internal' => true, 'days_ago' => 2],
                 ],
             ],
             [
-                'ref' => 'TKT-2026-0002', 'agency' => $this->kinshasa, 'client' => $this->extraClients['samuel.kib@monrespro.local'], 'assigned' => $this->operator, 'created_by' => $this->operator,
+                'ref' => 'TKT-2026-0002', 'agency' => $this->libreville, 'client' => $fabrice, 'assigned' => $this->operator, 'created_by' => $this->operator,
                 'category' => SavTicketCategory::LostDamaged, 'priority' => SavTicketPriority::Urgent, 'status' => SavTicketStatus::Escalated,
                 'channel' => 'phone', 'subject' => 'Colis endommagé — vase en cristal cassé',
-                'description' => "Client appelle : le colis EXP2026050012 contenant un vase en cristal est arrivé endommagé. Le vase est cassé en morceaux. Photos envoyées par WhatsApp.",
+                'description' => "Le client appelle : le colis EXP2026050012 contenant un vase en cristal est arrivé endommagé. Le vase est cassé en morceaux. Photos envoyées par WhatsApp.",
                 'related_type' => Shipment::class, 'related_id' => $shipment12?->id,
                 'sla_deadline_at' => now()->addHours(12), 'first_response_at' => now()->subHours(5), 'escalated_at' => now()->subHours(1), 'days_ago' => 2,
                 'messages' => [
-                    ['user' => $this->operator, 'body' => "Le client Samuel Kibangula a appelé pour signaler un colis endommagé. Photos reçues via WhatsApp montrant le vase cassé.", 'internal' => false, 'days_ago' => 2],
-                    ['user' => $this->operator, 'body' => "Note interne : Vérifier l'assurance transport. Valeur déclarée 250 EUR. Escalader à l'admin pour décision remboursement.", 'internal' => true, 'days_ago' => 1],
-                    ['user' => $this->adminKin, 'body' => "Dossier pris en charge. Je contacte le hub Paris pour le rapport de dommage. Remboursement partiel à envisager.", 'internal' => true, 'days_ago' => 0],
+                    ['user' => $this->operator, 'body' => "Le client Fabrice Nguema a appelé pour signaler un colis endommagé. Photos reçues via WhatsApp montrant le vase cassé.", 'internal' => false, 'days_ago' => 2],
+                    ['user' => $this->operator, 'body' => "Note interne : vérifier l'assurance transport. Valeur déclarée 164 000 FCFA. Escalader à l'admin pour décision de remboursement.", 'internal' => true, 'days_ago' => 1],
+                    ['user' => $this->adminLbv, 'body' => "Dossier pris en charge. Je contacte le hub de Paris pour le rapport de dommage. Remboursement partiel à envisager.", 'internal' => true, 'days_ago' => 0],
                 ],
             ],
             [
-                'ref' => 'TKT-2026-0003', 'agency' => $this->kinshasa, 'client' => $this->client1, 'assigned' => $this->operator, 'created_by' => $this->client1,
+                'ref' => 'TKT-2026-0003', 'agency' => $this->libreville, 'client' => $this->client1, 'assigned' => $this->operator, 'created_by' => $this->client1,
                 'category' => SavTicketCategory::CustomsIssue, 'priority' => SavTicketPriority::Normal, 'status' => SavTicketStatus::WaitingClient,
                 'channel' => 'web', 'subject' => 'Colis bloqué en douane depuis 5 jours',
-                'description' => "Mon colis EXP2026040003 est bloqué en douane à Matadi depuis 5 jours. Pouvez-vous m'aider à débloquer la situation ?",
+                'description' => "Mon colis EXP2026040003 est bloqué en douane au port d'Owendo depuis 5 jours. Pouvez-vous m'aider à débloquer la situation ?",
                 'related_type' => Shipment::class, 'related_id' => $shipment3?->id,
                 'sla_deadline_at' => now()->addHours(72), 'first_response_at' => now()->subDays(2), 'days_ago' => 5,
                 'messages' => [
                     ['user' => $this->client1, 'body' => "Bonjour, mon colis maritime est bloqué en douane depuis 5 jours. Numéro EXP2026040003. C'est un groupe électrogène.", 'internal' => false, 'days_ago' => 5],
-                    ['user' => $this->operator, 'body' => "Bonjour Grace, votre colis nécessite un document supplémentaire pour le dédouanement : la facture originale du fournisseur chinois. Pouvez-vous nous la transmettre ?", 'internal' => false, 'days_ago' => 3],
+                    ['user' => $this->operator, 'body' => "Bonjour Christelle, votre colis nécessite un document supplémentaire pour le dédouanement : la facture originale du fournisseur chinois. Pouvez-vous nous la transmettre ?", 'internal' => false, 'days_ago' => 3],
                 ],
             ],
             [
-                'ref' => 'TKT-2026-0004', 'agency' => $this->kinshasa, 'client' => $this->client1, 'assigned' => null, 'created_by' => $this->client1,
+                'ref' => 'TKT-2026-0004', 'agency' => $this->libreville, 'client' => $this->client1, 'assigned' => null, 'created_by' => $this->client1,
                 'category' => SavTicketCategory::GeneralQuestion, 'priority' => SavTicketPriority::Low, 'status' => SavTicketStatus::Resolved,
                 'channel' => 'web', 'subject' => 'Comment fonctionne le regroupement de colis ?',
                 'description' => "Je voudrais comprendre comment fonctionne le service de regroupement. Est-ce que je peux regrouper des colis venant de différents magasins ?",
                 'sla_deadline_at' => now()->subDays(5), 'first_response_at' => now()->subDays(8), 'resolved_at' => now()->subDays(6), 'days_ago' => 10,
                 'messages' => [
-                    ['user' => $this->client1, 'body' => "Bonjour, je voudrais savoir si je peux regrouper des colis de plusieurs magasins différents en un seul envoi vers Kinshasa ?", 'internal' => false, 'days_ago' => 10],
-                    ['user' => $this->operator, 'body' => "Bonjour Grace ! Oui, c'est exactement le principe du regroupement. Vous pouvez faire livrer plusieurs colis à votre casier MRP-KIN-0001 chez notre entrepôt Bruxelles. Une fois tous les colis arrivés, nous les regroupons en un seul envoi, ce qui réduit considérablement les frais d'expédition. Vous bénéficiez de 45 jours de stockage gratuit.", 'internal' => false, 'days_ago' => 8],
+                    ['user' => $this->client1, 'body' => "Bonjour, je voudrais savoir si je peux regrouper des colis de plusieurs magasins différents en un seul envoi vers Libreville ?", 'internal' => false, 'days_ago' => 10],
+                    ['user' => $this->operator, 'body' => "Bonjour Christelle ! Oui, c'est exactement le principe du regroupement. Vous pouvez faire livrer plusieurs colis à votre casier KTD-LBV-0001 dans notre entrepôt de Paris. Une fois tous les colis arrivés, nous les regroupons en un seul envoi, ce qui réduit considérablement les frais d'expédition. Vous bénéficiez de 45 jours de stockage gratuit.", 'internal' => false, 'days_ago' => 8],
                     ['user' => $this->client1, 'body' => "Super, merci beaucoup pour l'explication ! C'est très clair.", 'internal' => false, 'days_ago' => 7],
                 ],
             ],
             [
-                'ref' => 'TKT-2026-0005', 'agency' => $this->kinshasa, 'client' => $this->extraClients['esther.tshi@monrespro.local'], 'assigned' => $this->operator, 'created_by' => $this->extraClients['esther.tshi@monrespro.local'],
+                'ref' => 'TKT-2026-0005', 'agency' => $this->libreville, 'client' => $nadege, 'assigned' => $this->operator, 'created_by' => $nadege,
                 'category' => SavTicketCategory::PaymentIssue, 'priority' => SavTicketPriority::Urgent, 'status' => SavTicketStatus::Open,
-                'channel' => 'whatsapp', 'subject' => 'Paiement M-Pesa non pris en compte',
-                'description' => "J'ai payé 150 USD via M-Pesa il y a 3 jours mais ma facture montre toujours 'impayé'. Voici le code de confirmation : MP20260509123456.",
+                'channel' => 'whatsapp', 'subject' => 'Paiement Airtel Money non pris en compte',
+                'description' => "J'ai payé 68 500 FCFA via Airtel Money il y a 3 jours mais ma facture indique toujours « impayé ». Voici le code de confirmation : AM20260509123456.",
                 'sla_deadline_at' => now()->addHours(24), 'days_ago' => 1,
                 'messages' => [
-                    ['user' => $this->extraClients['esther.tshi@monrespro.local'], 'body' => "Bonjour, j'ai payé 150 USD via M-Pesa le 09/05/2026. Code confirmation : MP20260509123456. Mon compte montre toujours impayé. Merci de vérifier.", 'internal' => false, 'days_ago' => 1],
+                    ['user' => $nadege, 'body' => "Bonjour, j'ai payé 68 500 FCFA via Airtel Money le 09/05/2026. Code de confirmation : AM20260509123456. Mon compte indique toujours impayé. Merci de vérifier.", 'internal' => false, 'days_ago' => 1],
                 ],
             ],
             [
-                'ref' => 'TKT-2026-0006', 'agency' => $this->kinshasa, 'client' => $this->client2, 'assigned' => $this->operator, 'created_by' => $this->client2,
+                'ref' => 'TKT-2026-0006', 'agency' => $this->libreville, 'client' => $this->client2, 'assigned' => $this->operator, 'created_by' => $this->client2,
                 'category' => SavTicketCategory::NonConforming, 'priority' => SavTicketPriority::Normal, 'status' => SavTicketStatus::Closed,
                 'channel' => 'email', 'subject' => 'Article reçu ne correspond pas à la commande',
                 'description' => "J'ai commandé des coques Samsung S24 mais j'ai reçu des coques pour iPhone 15. Ce n'est pas ce que j'ai commandé.",
@@ -948,19 +985,20 @@ class DemoDataSeeder extends Seeder
         $this->command?->info('Remboursements…');
 
         $shipment12 = Shipment::where('public_tracking', 'EXP2026050012')->first();
+        $murielle = $this->extraClients['murielle.ndong@kotinda.local'] ?? $this->client3;
 
         $refunds = [
             [
                 'reference_code' => 'RMB-0001',
                 'refundable_type' => Shipment::class, 'refundable_id' => $shipment12?->id,
-                'client_id' => $this->extraClients['samuel.kib@monrespro.local']?->id,
-                'agency_id' => $this->kinshasa->id,
-                'amount' => 125.00, 'currency' => 'EUR',
+                'client_id' => $this->extraClients['fabrice.nguema@kotinda.local']?->id,
+                'agency_id' => $this->libreville->id,
+                'amount' => 82000, 'currency' => 'XAF',
                 'status' => RefundStatus::UnderReview,
-                'reason' => 'Vase en cristal cassé à la réception. Assurance couvre 50% de la valeur déclarée.',
+                'reason' => 'Vase en cristal cassé à la réception. L\'assurance couvre 50 % de la valeur déclarée (164 000 FCFA).',
                 'reason_category' => 'damaged',
-                'payment_method' => 'M-Pesa',
-                'reviewed_by' => $this->adminKin->id,
+                'payment_method' => 'Airtel Money',
+                'reviewed_by' => $this->adminLbv->id,
                 'reviewed_at' => now()->subHours(3),
             ],
             [
@@ -968,28 +1006,28 @@ class DemoDataSeeder extends Seeder
                 'refundable_type' => AssistedPurchase::class,
                 'refundable_id' => AssistedPurchase::where('status', AssistedPurchaseStatus::CANCELLED)->first()?->id,
                 'client_id' => $this->client2->id,
-                'agency_id' => $this->kinshasa->id,
-                'amount' => 0, 'currency' => 'USD',
+                'agency_id' => $this->libreville->id,
+                'amount' => 0, 'currency' => 'XAF',
                 'status' => RefundStatus::Rejected,
                 'reason' => 'Demande de remboursement pour achat assisté annulé.',
                 'reason_category' => 'cancellation',
                 'rejection_reason' => 'Aucun paiement effectué avant l\'annulation.',
-                'reviewed_by' => $this->adminKin->id,
+                'reviewed_by' => $this->adminLbv->id,
                 'reviewed_at' => now()->subDays(5),
             ],
             [
                 'reference_code' => 'RMB-0003',
                 'refundable_type' => Shipment::class,
                 'refundable_id' => Shipment::where('public_tracking', 'EXP2026030001')->first()?->id,
-                'client_id' => $this->client3->id,
-                'agency_id' => $this->bruxelles?->id,
-                'amount' => 15.00, 'currency' => 'USD',
+                'client_id' => $murielle->id,
+                'agency_id' => $this->paris?->id,
+                'amount' => 8900, 'currency' => 'XAF',
                 'status' => RefundStatus::Completed,
-                'reason' => 'Surcharge corrigée — erreur de pesée au hub.',
+                'reason' => 'Surfacturation corrigée — erreur de pesée au hub (1 kg à 8 900 FCFA).',
                 'reason_category' => 'overcharge',
                 'payment_method' => 'Virement SEPA',
-                'reviewed_by' => $this->adminBxl->id, 'reviewed_at' => now()->subDays(50),
-                'processed_by' => $this->adminBxl->id, 'processed_at' => now()->subDays(48),
+                'reviewed_by' => $this->adminPar->id, 'reviewed_at' => now()->subDays(50),
+                'processed_by' => $this->adminPar->id, 'processed_at' => now()->subDays(48),
                 'completed_at' => now()->subDays(45),
             ],
         ];
@@ -1009,16 +1047,16 @@ class DemoDataSeeder extends Seeder
         $this->command?->info('Notifications…');
 
         $notifs = [
-            ['user' => $this->client1, 'type' => 'in_app', 'title' => 'Colis arrivé à destination', 'body' => 'Votre colis EXP2026050008 est arrivé à Kinshasa. Planifiez votre livraison.', 'action_url' => '/shipments/EXP2026050008', 'status' => 'sent', 'days_ago' => 3, 'read' => false],
-            ['user' => $this->client1, 'type' => 'in_app', 'title' => 'Devis prêt — Nike Air Max 90', 'body' => 'Votre devis d\'achat assisté est prêt. Montant : 214.00 USD.', 'action_url' => '/purchase-orders', 'status' => 'sent', 'days_ago' => 2, 'read' => true],
-            ['user' => $this->client1, 'type' => 'in_app', 'title' => 'Colis livré', 'body' => 'Votre colis EXP2026030001 a été livré avec succès. Merci d\'avoir choisi Monrespro !', 'action_url' => '/shipments/EXP2026030001', 'status' => 'sent', 'days_ago' => 55, 'read' => true],
-            ['user' => $this->client2, 'type' => 'in_app', 'title' => 'Échec de livraison', 'body' => 'La livraison de votre colis EXP2026050009 a échoué. Destinataire absent. Nous reprogrammons.', 'action_url' => '/shipments/EXP2026050009', 'status' => 'sent', 'days_ago' => 3, 'read' => false],
+            ['user' => $this->client1, 'type' => 'in_app', 'title' => 'Colis arrivé à destination', 'body' => 'Votre colis EXP2026050008 est arrivé à Libreville. Planifiez votre livraison.', 'action_url' => '/shipments/EXP2026050008', 'status' => 'sent', 'days_ago' => 3, 'read' => false],
+            ['user' => $this->client1, 'type' => 'in_app', 'title' => 'Devis prêt — Nike Air Max 90', 'body' => 'Votre devis d\'achat assisté est prêt. Montant : 68 500 FCFA.', 'action_url' => '/purchase-orders', 'status' => 'sent', 'days_ago' => 2, 'read' => true],
+            ['user' => $this->client1, 'type' => 'in_app', 'title' => 'Colis livré', 'body' => 'Votre colis EXP2026040007 a été livré avec succès. Merci d\'avoir choisi Kotinda !', 'action_url' => '/shipments/EXP2026040007', 'status' => 'sent', 'days_ago' => 30, 'read' => true],
+            ['user' => $this->client2, 'type' => 'in_app', 'title' => 'Échec de livraison', 'body' => 'La livraison de votre colis EXP2026050009 à Port-Gentil a échoué. Destinataire absent. Nous reprogrammons.', 'action_url' => '/shipments/EXP2026050009', 'status' => 'sent', 'days_ago' => 3, 'read' => false],
             ['user' => $this->client2, 'type' => 'in_app', 'title' => 'Ticket SAV mis à jour', 'body' => 'Votre ticket TKT-2026-0001 a été mis à jour par l\'opérateur.', 'action_url' => '/sav/TKT-2026-0001', 'status' => 'sent', 'days_ago' => 2, 'read' => false],
-            ['user' => $this->client3, 'type' => 'in_app', 'title' => 'Colis réceptionné', 'body' => 'Votre colis a été réceptionné dans notre entrepôt de Bruxelles.', 'action_url' => '/shipments', 'status' => 'sent', 'days_ago' => 1, 'read' => false],
-            ['user' => $this->operator, 'type' => 'in_app', 'title' => 'Nouveau ticket SAV urgent', 'body' => 'TKT-2026-0005 — Paiement M-Pesa non pris en compte. Priorité urgente.', 'action_url' => '/sav/TKT-2026-0005', 'status' => 'sent', 'days_ago' => 1, 'read' => false],
-            ['user' => $this->driver, 'type' => 'in_app', 'title' => 'Nouveau ramassage assigné', 'body' => 'Un ramassage vous a été assigné : Avenue Kasa-Vubu 120, Barumbu.', 'action_url' => '/pickups', 'status' => 'sent', 'days_ago' => 0, 'read' => false],
-            ['user' => $this->adminKin, 'type' => 'in_app', 'title' => 'Ticket escaladé', 'body' => 'Le ticket TKT-2026-0002 (colis endommagé) a été escaladé pour décision.', 'action_url' => '/sav/TKT-2026-0002', 'status' => 'sent', 'days_ago' => 0, 'read' => false],
-            ['user' => $this->extraClients['marie.lukusa@monrespro.local'], 'type' => 'in_app', 'title' => 'Pré-alerte confirmée', 'body' => 'Votre pré-alerte ASN-0007 a été enregistrée. Nous attendons votre colis.', 'action_url' => '/pre-alerts', 'status' => 'sent', 'days_ago' => 3, 'read' => true],
+            ['user' => $this->client3, 'type' => 'in_app', 'title' => 'Colis réceptionné', 'body' => 'Votre colis a été réceptionné dans notre entrepôt de Paris.', 'action_url' => '/shipments', 'status' => 'sent', 'days_ago' => 1, 'read' => false],
+            ['user' => $this->operator, 'type' => 'in_app', 'title' => 'Nouveau ticket SAV urgent', 'body' => 'TKT-2026-0005 — Paiement Airtel Money non pris en compte. Priorité urgente.', 'action_url' => '/sav/TKT-2026-0005', 'status' => 'sent', 'days_ago' => 1, 'read' => false],
+            ['user' => $this->driver, 'type' => 'in_app', 'title' => 'Nouveau ramassage assigné', 'body' => 'Un ramassage vous a été assigné : Angondjé, Akanda.', 'action_url' => '/pickups', 'status' => 'sent', 'days_ago' => 0, 'read' => false],
+            ['user' => $this->adminLbv, 'type' => 'in_app', 'title' => 'Ticket escaladé', 'body' => 'Le ticket TKT-2026-0002 (colis endommagé) a été escaladé pour décision.', 'action_url' => '/sav/TKT-2026-0002', 'status' => 'sent', 'days_ago' => 0, 'read' => false],
+            ['user' => $this->extraClients['aurelie.mba@kotinda.local'] ?? null, 'type' => 'in_app', 'title' => 'Pré-alerte confirmée', 'body' => 'Votre pré-alerte ASN-0007 a été enregistrée. Nous attendons votre colis à Paris.', 'action_url' => '/pre-alerts', 'status' => 'sent', 'days_ago' => 3, 'read' => true],
         ];
 
         foreach ($notifs as $n) {
@@ -1047,21 +1085,21 @@ class DemoDataSeeder extends Seeder
         $this->command?->info('Abonnés newsletter…');
 
         $subscribers = [
-            ['email' => 'grace.kalala@monrespro.local', 'name' => 'Grace Kalala', 'locale' => 'fr', 'source' => 'registration'],
-            ['email' => 'emmanuel.ngoy@monrespro.local', 'name' => 'Emmanuel Ngoy', 'locale' => 'fr', 'source' => 'registration'],
-            ['email' => 'cedric.ilunga@monrespro.local', 'name' => 'Cédric Ilunga', 'locale' => 'fr', 'source' => 'registration'],
-            ['email' => 'marie.lukusa@monrespro.local', 'name' => 'Marie Lukusa', 'locale' => 'fr', 'source' => 'registration'],
-            ['email' => 'nathalie.mwamba@gmail.com', 'name' => 'Nathalie Mwamba', 'locale' => 'fr', 'source' => 'website'],
-            ['email' => 'patrick.mukungu@yahoo.fr', 'name' => 'Patrick Mukungu', 'locale' => 'fr', 'source' => 'website'],
-            ['email' => 'julien.kasongo@outlook.com', 'name' => 'Julien Kasongo', 'locale' => 'fr', 'source' => 'website'],
-            ['email' => 'sandrine.luzolo@gmail.com', 'name' => 'Sandrine Luzolo', 'locale' => 'fr', 'source' => 'facebook'],
-            ['email' => 'alain.kimbembe@gmail.com', 'name' => 'Alain Kimbembe', 'locale' => 'fr', 'source' => 'website'],
-            ['email' => 'viviane.nzuzi@gmail.com', 'name' => 'Viviane Nzuzi', 'locale' => 'fr', 'source' => 'instagram'],
-            ['email' => 'pascal.mwangi@gmail.com', 'name' => 'Pascal Mwangi', 'locale' => 'en', 'source' => 'website'],
+            ['email' => 'christelle.nze@kotinda.local', 'name' => 'Christelle Nzé', 'locale' => 'fr', 'source' => 'registration'],
+            ['email' => 'ghislain.ondo@kotinda.local', 'name' => 'Ghislain Ondo', 'locale' => 'fr', 'source' => 'registration'],
+            ['email' => 'prisca.koumba@kotinda.local', 'name' => 'Prisca Koumba', 'locale' => 'fr', 'source' => 'registration'],
+            ['email' => 'aurelie.mba@kotinda.local', 'name' => 'Aurélie Mba', 'locale' => 'fr', 'source' => 'registration'],
+            ['email' => 'nathalie.ella@gmail.com', 'name' => 'Nathalie Mba Ella', 'locale' => 'fr', 'source' => 'website'],
+            ['email' => 'pacome.ndong@yahoo.fr', 'name' => 'Pacôme Ndong', 'locale' => 'fr', 'source' => 'website'],
+            ['email' => 'julien.ovono@outlook.com', 'name' => 'Julien Ovono', 'locale' => 'fr', 'source' => 'website'],
+            ['email' => 'sandrine.bekale@gmail.com', 'name' => 'Sandrine Bekale', 'locale' => 'fr', 'source' => 'facebook'],
+            ['email' => 'alain.nzoghe@gmail.com', 'name' => 'Alain Nzoghe', 'locale' => 'fr', 'source' => 'website'],
+            ['email' => 'viviane.ngoma@gmail.com', 'name' => 'Viviane Ngoma', 'locale' => 'fr', 'source' => 'instagram'],
+            ['email' => 'pascal.mouity@gmail.com', 'name' => 'Pascal Mouity', 'locale' => 'en', 'source' => 'website'],
             ['email' => 'fatou.diallo@gmail.com', 'name' => 'Fatou Diallo', 'locale' => 'fr', 'source' => 'website'],
-            ['email' => 'roger.tshibangu@gmail.com', 'name' => 'Roger Tshibangu', 'locale' => 'fr', 'source' => 'referral'],
-            ['email' => 'clemence.mbaya@gmail.com', 'name' => 'Clémence Mbaya', 'locale' => 'fr', 'source' => 'website'],
-            ['email' => 'jean.mobutu@gmail.com', 'name' => 'Jean Mobutu', 'locale' => 'fr', 'source' => 'website'],
+            ['email' => 'roger.mboumba@gmail.com', 'name' => 'Roger Mboumba', 'locale' => 'fr', 'source' => 'referral'],
+            ['email' => 'clemence.mbadinga@gmail.com', 'name' => 'Clémence Mbadinga', 'locale' => 'fr', 'source' => 'website'],
+            ['email' => 'jean.obame@gmail.com', 'name' => 'Jean Obame', 'locale' => 'fr', 'source' => 'website'],
         ];
 
         foreach ($subscribers as $i => $s) {
@@ -1087,10 +1125,10 @@ class DemoDataSeeder extends Seeder
         $ap1 = AssistedPurchase::where('status', AssistedPurchaseStatus::ARRIVED_AT_HUB)->first();
 
         $comments = [
-            ['type' => Shipment::class, 'id' => $shipment3?->id, 'user' => $this->customs, 'body' => 'Documents douaniers reçus — manque certificat d\'origine. Contacter l\'expéditeur.', 'internal' => true, 'days_ago' => 4],
+            ['type' => Shipment::class, 'id' => $shipment3?->id, 'user' => $this->customs, 'body' => 'Documents douaniers reçus au port d\'Owendo — manque le certificat d\'origine. Contacter l\'expéditeur.', 'internal' => true, 'days_ago' => 4],
             ['type' => Shipment::class, 'id' => $shipment3?->id, 'user' => $this->operator, 'body' => 'Certificat d\'origine demandé au fournisseur chinois. Délai estimé 48h.', 'internal' => true, 'days_ago' => 3],
             ['type' => Shipment::class, 'id' => $shipment9?->id, 'user' => $this->driver, 'body' => 'Première tentative de livraison échouée — personne au domicile. Reprogrammé pour demain.', 'internal' => false, 'days_ago' => 3],
-            ['type' => AssistedPurchase::class, 'id' => $ap1?->id, 'user' => $this->operator, 'body' => 'Trottinette reçue au hub. Poids vérifié : 14.5 kg (estimé 15 kg). Légère différence acceptable.', 'internal' => false, 'days_ago' => 1],
+            ['type' => AssistedPurchase::class, 'id' => $ap1?->id, 'user' => $this->operator, 'body' => 'Trottinette reçue au hub de Paris. Poids vérifié : 14,5 kg (estimé 15 kg). Légère différence acceptable.', 'internal' => false, 'days_ago' => 1],
             ['type' => AssistedPurchase::class, 'id' => $ap1?->id, 'user' => $this->operator, 'body' => 'Photos de réception prises et ajoutées au dossier. Article en bon état.', 'internal' => true, 'days_ago' => 1],
         ];
 

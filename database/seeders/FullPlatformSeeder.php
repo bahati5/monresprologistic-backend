@@ -37,17 +37,20 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
- * Seed complet pour démarrer la plateforme Monrespro Logistics.
+ * Seed complet pour démarrer la plateforme Kotinda (Gabon).
  *
- * Données basées sur les sites www.monrespro.cd et logistics.monrespro.com :
- * - 4 agences (Kinshasa, Bruxelles, Paris, Guangzhou)
- * - Hubs d'entreposage réels
- * - Modes d'expédition (aérien, maritime, express)
- * - Lignes commerciales avec tarifs réels du site
- * - Méthodes de paiement RDC (M-Pesa, Orange Money, Airtel, etc.)
+ * Données de démonstration adaptées au marché gabonais :
+ * - 5 agences : Libreville (siège), Port-Gentil, et les hubs d'origine Paris, Guangzhou, Dubaï
+ * - Hubs d'entreposage (origine et destination)
+ * - Modes d'expédition (aérien, maritime, express, national Gabon)
+ * - Lignes commerciales avec tarifs en FCFA (XAF)
+ * - Méthodes de paiement Gabon (Airtel Money, Moov Money, espèces, virement)
  * - Marchands partenaires enrichis
  * - Catégories d'articles, modèles de devis, templates de notification
  * - Utilisateurs démo pour chaque rôle
+ *
+ * Taux de référence : 1 EUR = 655,957 XAF (parité fixe), 1 USD ≈ 600 XAF,
+ * 1 CNY ≈ 84 XAF, 1 AED ≈ 163 XAF.
  *
  * Usage : php artisan db:seed --class=FullPlatformSeeder
  * (ou via DatabaseSeeder après les seeders de base)
@@ -77,7 +80,26 @@ class FullPlatformSeeder extends Seeder
         $this->seedDemoUsers();
         $this->seedDemoAssistedPurchases();
 
-        $this->command?->info('✓ Seed complet Monrespro Logistics terminé.');
+        $this->command?->info('✓ Seed complet Kotinda terminé.');
+    }
+
+    /**
+     * Identifiants pays / région / ville depuis le référentiel géographique (LocationSeeder).
+     *
+     * @return array{country_id: ?int, state_id: ?int, city_id: ?int}
+     */
+    private function locate(string $iso2, ?string $cityName = null): array
+    {
+        $countryId = \DB::table('countries')->where('iso2', $iso2)->value('id');
+        $city = ($countryId && $cityName)
+            ? \DB::table('cities')->where('country_id', $countryId)->where('name', $cityName)->first(['id', 'state_id'])
+            : null;
+
+        return [
+            'country_id' => $countryId,
+            'state_id' => $city?->state_id,
+            'city_id' => $city?->id,
+        ];
     }
 
     // ─── Paramètres globaux ────────────────────────────────────────────
@@ -88,16 +110,40 @@ class FullPlatformSeeder extends Seeder
 
         $settings = [
             // Identité
-            ['key' => 'company_name', 'value' => 'Monrespro Logistics', 'type' => 'string'],
-            ['key' => 'company_legal_name', 'value' => 'Monrespro Logistics SARL', 'type' => 'string'],
-            ['key' => 'company_tagline', 'value' => 'Achat en ligne international et envoi de colis en RDC et dans le monde', 'type' => 'string'],
-            ['key' => 'company_email', 'value' => 'info@monrespro.com', 'type' => 'string'],
-            ['key' => 'company_phone', 'value' => '+243 9000 777 84', 'type' => 'string'],
-            ['key' => 'company_phone_be', 'value' => '+32 460 25 23 54', 'type' => 'string'],
-            ['key' => 'company_phone_us', 'value' => '+1 864 400 00 40', 'type' => 'string'],
-            ['key' => 'company_website', 'value' => 'https://www.monrespro.cd', 'type' => 'string'],
-            ['key' => 'company_website_logistics', 'value' => 'https://logistics.monrespro.com', 'type' => 'string'],
-            ['key' => 'company_founded_year', 'value' => '2012', 'type' => 'string'],
+            ['key' => 'company_name', 'value' => 'Kotinda', 'type' => 'string'],
+            ['key' => 'company_legal_name', 'value' => 'Kotinda SARL', 'type' => 'string'],
+            ['key' => 'company_tagline', 'value' => 'Achat en ligne international et envoi de colis vers le Gabon et dans le monde', 'type' => 'string'],
+            ['key' => 'company_email', 'value' => 'info@kotinda.ga', 'type' => 'string'],
+            ['key' => 'company_phone', 'value' => '+241 011 44 20 00', 'type' => 'string'],
+            ['key' => 'company_phone_fr', 'value' => '+33 1 84 80 12 34', 'type' => 'string'],
+            ['key' => 'company_phone_whatsapp', 'value' => '+241 077 44 20 00', 'type' => 'string'],
+            ['key' => 'company_website', 'value' => 'https://www.kotinda.ga', 'type' => 'string'],
+            ['key' => 'company_website_logistics', 'value' => 'https://app.kotinda.ga', 'type' => 'string'],
+            ['key' => 'company_founded_year', 'value' => '2026', 'type' => 'string'],
+
+            // Documents / identité visuelle
+            ['key' => 'site_name', 'value' => 'Kotinda', 'type' => 'string'],
+            ['key' => 'site_email', 'value' => 'info@kotinda.ga', 'type' => 'string'],
+            ['key' => 'phone_fixed', 'value' => '+241 011 44 20 00', 'type' => 'string'],
+            ['key' => 'phone_mobile', 'value' => '+241 077 44 20 00', 'type' => 'string'],
+            ['key' => 'address', 'value' => 'Boulevard Triomphal Omar Bongo, quartier Louis', 'type' => 'string'],
+            ['key' => 'city', 'value' => 'Libreville', 'type' => 'string'],
+            ['key' => 'country', 'value' => 'Gabon', 'type' => 'string'],
+
+            // Devise (franc CFA d'Afrique centrale)
+            ['key' => 'currency', 'value' => 'XAF', 'type' => 'string'],
+            ['key' => 'currency_symbol', 'value' => 'FCFA', 'type' => 'string'],
+            ['key' => 'symbol_position', 'value' => 'suffix', 'type' => 'string'],
+            ['key' => 'decimals', 'value' => '0', 'type' => 'integer'],
+            ['key' => 'quote_primary_currency', 'value' => 'XAF', 'type' => 'string'],
+            ['key' => 'quote_secondary_currency_enabled', 'value' => '1', 'type' => 'boolean'],
+            ['key' => 'quote_secondary_currency', 'value' => 'EUR', 'type' => 'string'],
+            ['key' => 'quote_secondary_currency_rate', 'value' => '0.001524', 'type' => 'string'],
+
+            // Préfixes (casiers et suivi)
+            ['key' => 'locker_prefix', 'value' => 'KTD', 'type' => 'string'],
+            ['key' => 'tracking_prefix', 'value' => 'KTD', 'type' => 'string'],
+            ['key' => 'locker_address_template', 'value' => "Kotinda Hub Paris\n{{locker_code}}\n95700 Roissy-en-France, France", 'type' => 'string'],
 
             // Devis
             ['key' => 'quote_validity_days', 'value' => '7', 'type' => 'integer'],
@@ -105,10 +151,10 @@ class FullPlatformSeeder extends Seeder
             ['key' => 'quote_reminder_2_delay_days', 'value' => '5', 'type' => 'integer'],
             ['key' => 'quote_auto_reminders_enabled', 'value' => '1', 'type' => 'boolean'],
 
-            // Commission assistance achat (7%, min 10 EUR d'après le site)
+            // Commission assistance achat (7 %, minimum 6 500 FCFA ≈ 10 EUR)
             ['key' => 'assisted_purchase_commission_rate', 'value' => '7', 'type' => 'string'],
-            ['key' => 'assisted_purchase_commission_min', 'value' => '10', 'type' => 'string'],
-            ['key' => 'assisted_purchase_commission_currency', 'value' => 'EUR', 'type' => 'string'],
+            ['key' => 'assisted_purchase_commission_min', 'value' => '6500', 'type' => 'string'],
+            ['key' => 'assisted_purchase_commission_currency', 'value' => 'XAF', 'type' => 'string'],
 
             // Numérotation devis / achats assistés
             ['key' => 'quote_reference_format', 'value' => '{prefix}-{YYYY}-{seq}', 'type' => 'string'],
@@ -116,7 +162,7 @@ class FullPlatformSeeder extends Seeder
             ['key' => 'quote_reference_seq_pad', 'value' => '5', 'type' => 'integer'],
             ['key' => 'quote_next_seq', 'value' => '1', 'type' => 'integer'],
 
-            // Stockage gratuit (45 jours d'après logistics.monrespro.com)
+            // Stockage gratuit dans les hubs d'origine
             ['key' => 'free_storage_days', 'value' => '45', 'type' => 'integer'],
 
             // Poids volumétrique
@@ -124,24 +170,24 @@ class FullPlatformSeeder extends Seeder
             ['key' => 'volumetric_divisor_sea', 'value' => '1000', 'type' => 'integer'],
 
             // Tracking
-            ['key' => 'tracking_url_prefix', 'value' => 'https://logistics.monrespro.com/tracking.php?code=', 'type' => 'string'],
+            ['key' => 'tracking_url_prefix', 'value' => 'https://app.kotinda.ga/tracking?code=', 'type' => 'string'],
 
             // Site / portail client
-            ['key' => 'site_url', 'value' => 'https://www.monrespro.cd', 'type' => 'string'],
-            ['key' => 'client_portal_url', 'value' => 'https://logistics.monrespro.com', 'type' => 'string'],
+            ['key' => 'site_url', 'value' => 'https://www.kotinda.ga', 'type' => 'string'],
+            ['key' => 'client_portal_url', 'value' => 'https://app.kotinda.ga', 'type' => 'string'],
 
             // Réseaux sociaux
-            ['key' => 'social_facebook', 'value' => 'https://www.facebook.com/monresprordc', 'type' => 'string'],
-            ['key' => 'social_instagram', 'value' => 'https://www.instagram.com/monresprordc', 'type' => 'string'],
-            ['key' => 'social_twitter', 'value' => 'https://twitter.com/monresprordc', 'type' => 'string'],
-            ['key' => 'social_youtube', 'value' => 'https://www.youtube.com/@monresprordc', 'type' => 'string'],
-            ['key' => 'social_linkedin', 'value' => 'https://www.linkedin.com/company/monrespro', 'type' => 'string'],
+            ['key' => 'social_facebook', 'value' => 'https://www.facebook.com/kotindagabon', 'type' => 'string'],
+            ['key' => 'social_instagram', 'value' => 'https://www.instagram.com/kotindagabon', 'type' => 'string'],
+            ['key' => 'social_twitter', 'value' => 'https://twitter.com/kotindagabon', 'type' => 'string'],
+            ['key' => 'social_youtube', 'value' => 'https://www.youtube.com/@kotindagabon', 'type' => 'string'],
+            ['key' => 'social_linkedin', 'value' => 'https://www.linkedin.com/company/kotinda', 'type' => 'string'],
 
             // Délais de livraison indicatifs
-            ['key' => 'delivery_estimate_national_same_province', 'value' => '1-2 jours ouvrés', 'type' => 'string'],
-            ['key' => 'delivery_estimate_national_inter_province', 'value' => '4-7 jours ouvrés', 'type' => 'string'],
+            ['key' => 'delivery_estimate_national_same_province', 'value' => '1-2 jours ouvrés (Grand Libreville, Port-Gentil)', 'type' => 'string'],
+            ['key' => 'delivery_estimate_national_inter_province', 'value' => '3-7 jours ouvrés (Franceville, Oyem, Lambaréné…)', 'type' => 'string'],
             ['key' => 'delivery_estimate_international_air', 'value' => '5-10 jours ouvrés', 'type' => 'string'],
-            ['key' => 'delivery_estimate_international_sea', 'value' => '4-6 semaines', 'type' => 'string'],
+            ['key' => 'delivery_estimate_international_sea', 'value' => '5-8 semaines', 'type' => 'string'],
         ];
 
         foreach ($settings as $s) {
@@ -157,53 +203,73 @@ class FullPlatformSeeder extends Seeder
 
         $agencies = [
             [
-                'code' => 'KIN',
-                'name' => 'Monrespro Kinshasa (Siège)',
-                'slug' => 'kinshasa',
-                'default_currency' => 'USD',
-                'exchange_rates' => ['USD_CDF' => 2800],
+                'code' => 'LBV',
+                'name' => 'Kotinda Libreville (Siège)',
+                'slug' => 'libreville',
+                'default_currency' => 'XAF',
+                'exchange_rates' => ['EUR_XAF' => 655.957, 'USD_XAF' => 600, 'CNY_XAF' => 84, 'AED_XAF' => 163],
                 'is_active' => true,
-                'contact_phone' => '+243 9000 777 84',
-                'contact_email' => 'kinshasa@monrespro.com',
-                'address' => 'Kinshasa, République Démocratique du Congo',
+                'contact_phone' => '+241 011 44 20 00',
+                'contact_phone_secondary' => '+241 077 44 20 00',
+                'contact_email' => 'libreville@kotinda.ga',
+                'address' => 'Boulevard Triomphal Omar Bongo, quartier Louis, Libreville, Gabon',
+                'location' => ['GA', 'Libreville'],
             ],
             [
-                'code' => 'BXL',
-                'name' => 'Monrespro Bruxelles',
-                'slug' => 'bruxelles',
-                'default_currency' => 'EUR',
-                'exchange_rates' => ['EUR_USD' => 1.08],
+                'code' => 'POG',
+                'name' => 'Kotinda Port-Gentil',
+                'slug' => 'port-gentil',
+                'default_currency' => 'XAF',
+                'exchange_rates' => ['EUR_XAF' => 655.957, 'USD_XAF' => 600, 'CNY_XAF' => 84, 'AED_XAF' => 163],
                 'is_active' => true,
-                'contact_phone' => '+32 460 25 23 54',
-                'contact_email' => 'bruxelles@monrespro.com',
-                'address' => 'Bruxelles, Belgique',
+                'contact_phone' => '+241 011 55 30 00',
+                'contact_phone_secondary' => '+241 066 55 30 00',
+                'contact_email' => 'portgentil@kotinda.ga',
+                'address' => 'Avenue Savorgnan de Brazza, quartier Grand Village, Port-Gentil, Gabon',
+                'location' => ['GA', 'Port-Gentil'],
             ],
             [
                 'code' => 'PAR',
-                'name' => 'Monrespro Paris',
+                'name' => 'Kotinda Paris (hub d\'origine)',
                 'slug' => 'paris',
                 'default_currency' => 'EUR',
-                'exchange_rates' => ['EUR_USD' => 1.08],
+                'exchange_rates' => ['EUR_XAF' => 655.957],
                 'is_active' => true,
-                'contact_phone' => '+33 1 00 00 00 00',
-                'contact_email' => 'paris@monrespro.com',
-                'address' => 'Paris, France',
+                'contact_phone' => '+33 1 84 80 12 34',
+                'contact_email' => 'paris@kotinda.ga',
+                'address' => 'Zone de fret Roissy-CDG, 95700 Roissy-en-France, France',
+                'location' => ['FR', 'Paris'],
             ],
             [
-                'code' => 'GZ',
-                'name' => 'Monrespro Guangzhou',
+                'code' => 'GZH',
+                'name' => 'Kotinda Guangzhou (hub d\'origine)',
                 'slug' => 'guangzhou',
                 'default_currency' => 'CNY',
-                'exchange_rates' => ['CNY_USD' => 0.14],
+                'exchange_rates' => ['CNY_XAF' => 84],
                 'is_active' => true,
-                'contact_phone' => '+86 000 000 0000',
-                'contact_email' => 'china@monrespro.com',
-                'address' => 'Guangzhou, Chine',
+                'contact_phone' => '+86 20 8888 1234',
+                'contact_email' => 'guangzhou@kotinda.ga',
+                'address' => 'District de Baiyun, Guangzhou, Chine',
+                'location' => ['CN', 'Guangzhou'],
+            ],
+            [
+                'code' => 'DXB',
+                'name' => 'Kotinda Dubaï (hub d\'origine)',
+                'slug' => 'dubai',
+                'default_currency' => 'AED',
+                'exchange_rates' => ['AED_XAF' => 163],
+                'is_active' => true,
+                'contact_phone' => '+971 4 255 1234',
+                'contact_email' => 'dubai@kotinda.ga',
+                'address' => 'Deira, près de Dubai Creek, Dubaï, Émirats arabes unis',
+                'location' => ['AE', 'Dubai'],
             ],
         ];
 
         foreach ($agencies as $data) {
-            Agency::updateOrCreate(['code' => $data['code']], $data);
+            [$iso2, $city] = $data['location'];
+            unset($data['location']);
+            Agency::updateOrCreate(['code' => $data['code']], array_merge($data, $this->locate($iso2, $city)));
         }
     }
 
@@ -214,13 +280,12 @@ class FullPlatformSeeder extends Seeder
         $this->command?->info('Hubs / entrepôts…');
 
         $hubs = [
-            ['code' => 'HUB-BXL', 'name' => 'Entrepôt Bruxelles (Belgique)', 'latitude' => '50.8503', 'longitude' => '4.3517', 'sort_order' => 1],
-            ['code' => 'HUB-PAR', 'name' => 'Entrepôt Paris (France)', 'latitude' => '48.8566', 'longitude' => '2.3522', 'sort_order' => 2],
-            ['code' => 'HUB-GZ', 'name' => 'Entrepôt Guangzhou (Chine)', 'latitude' => '23.1291', 'longitude' => '113.2644', 'sort_order' => 3],
+            ['code' => 'HUB-PAR', 'name' => 'Entrepôt Paris – Roissy-CDG (France)', 'latitude' => '49.0097', 'longitude' => '2.5479', 'sort_order' => 1],
+            ['code' => 'HUB-GZ', 'name' => 'Entrepôt Guangzhou (Chine)', 'latitude' => '23.1291', 'longitude' => '113.2644', 'sort_order' => 2],
+            ['code' => 'HUB-DXB', 'name' => 'Entrepôt Dubaï – Deira (Émirats arabes unis)', 'latitude' => '25.2711', 'longitude' => '55.3075', 'sort_order' => 3],
             ['code' => 'HUB-MIA', 'name' => 'Entrepôt Miami (USA)', 'latitude' => '25.7617', 'longitude' => '-80.1918', 'sort_order' => 4],
-            ['code' => 'HUB-YUL', 'name' => 'Entrepôt Montréal (Canada)', 'latitude' => '45.5017', 'longitude' => '-73.5673', 'sort_order' => 5],
-            ['code' => 'HUB-KIN', 'name' => 'Entrepôt Kinshasa (RDC)', 'latitude' => '-4.4419', 'longitude' => '15.2663', 'sort_order' => 6],
-            ['code' => 'HUB-LBB', 'name' => 'Entrepôt Lubumbashi (RDC)', 'latitude' => '-11.6876', 'longitude' => '27.5026', 'sort_order' => 7],
+            ['code' => 'HUB-LBV', 'name' => 'Entrepôt Libreville – Owendo (Gabon)', 'latitude' => '0.2917', 'longitude' => '9.5044', 'sort_order' => 5],
+            ['code' => 'HUB-POG', 'name' => 'Entrepôt Port-Gentil (Gabon)', 'latitude' => '-0.7193', 'longitude' => '8.7815', 'sort_order' => 6],
         ];
 
         foreach ($hubs as $hub) {
@@ -246,7 +311,7 @@ class FullPlatformSeeder extends Seeder
             ],
             [
                 'name' => 'Fret maritime',
-                'description' => 'Transport par bateau. Délai : 4–6 semaines. Économique pour gros volumes et marchandises lourdes.',
+                'description' => 'Transport par bateau jusqu\'au port d\'Owendo. Délai : 5–8 semaines. Économique pour gros volumes et marchandises lourdes.',
                 'is_active' => true,
                 'sort_order' => 2,
                 'volumetric_divisor' => 1000,
@@ -263,8 +328,8 @@ class FullPlatformSeeder extends Seeder
                 'delivery_options' => ['DHL Express', 'FedEx Priority', 'Aramex'],
             ],
             [
-                'name' => 'Envoi national RDC',
-                'description' => 'Livraison intérieure en RDC. Même province : 1–2 jours, inter-province : 4–7 jours.',
+                'name' => 'Envoi national Gabon',
+                'description' => 'Livraison intérieure au Gabon. Grand Libreville et Port-Gentil : 1–2 jours, autres provinces (Franceville, Oyem, Lambaréné…) : 3–7 jours.',
                 'is_active' => true,
                 'sort_order' => 4,
                 'volumetric_divisor' => 5000,
@@ -278,7 +343,7 @@ class FullPlatformSeeder extends Seeder
         }
     }
 
-    // ─── Lignes commerciales + tarifs (données réelles du site) ──────
+    // ─── Lignes commerciales + tarifs (FCFA) ─────────────────────────
 
     private function seedShipLines(): void
     {
@@ -286,7 +351,6 @@ class FullPlatformSeeder extends Seeder
 
         $aerien = ShippingMode::where('name', 'Fret aérien')->first();
         $maritime = ShippingMode::where('name', 'Fret maritime')->first();
-        $express = ShippingMode::where('name', 'Courrier express')->first();
 
         if (! $aerien || ! $maritime) {
             $this->command?->warn('Modes d\'expédition non trouvés, lignes ignorées.');
@@ -294,162 +358,84 @@ class FullPlatformSeeder extends Seeder
         }
 
         // Contrainte unique (ship_line_id, shipping_mode_id) → une seule rate par ligne+mode.
-        // Les paliers de poids sont modélisés comme des lignes distinctes.
+        // Les paliers de poids sont modélisés comme des lignes distinctes. Tarifs en XAF (FCFA) par kg.
         $lines = [
-            // ── Belgique → RDC ──
+            // ── France → Gabon ──
             [
-                'name' => 'Belgique → RDC (aérien 1–10 kg)',
-                'description' => 'Fret aérien Bruxelles – Kinshasa, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 15.00, 'label' => '1–10 kg']],
-                'countries' => ['BE', 'CD'],
+                'name' => 'France → Gabon (aérien 1–10 kg)',
+                'description' => 'Fret aérien Paris-CDG – Libreville, colis de 1 à 10 kg.',
+                'rates' => [['mode' => $aerien, 'price' => 8900, 'label' => '1–10 kg']],
+                'countries' => ['FR', 'GA'],
             ],
             [
-                'name' => 'Belgique → RDC (aérien +10 kg)',
-                'description' => 'Fret aérien Bruxelles – Kinshasa, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 12.00, 'label' => '+10 kg']],
-                'countries' => ['BE', 'CD'],
+                'name' => 'France → Gabon (aérien +10 kg)',
+                'description' => 'Fret aérien Paris-CDG – Libreville, colis de plus de 10 kg.',
+                'rates' => [['mode' => $aerien, 'price' => 7500, 'label' => '+10 kg']],
+                'countries' => ['FR', 'GA'],
             ],
             [
-                'name' => 'Belgique → RDC (maritime)',
-                'description' => 'Fret maritime Bruxelles – Kinshasa.',
-                'rates' => [['mode' => $maritime, 'price' => 16.00, 'label' => 'Par volume']],
-                'countries' => ['BE', 'CD'],
+                'name' => 'France → Gabon (maritime)',
+                'description' => 'Fret maritime Le Havre – Owendo (groupage).',
+                'rates' => [['mode' => $maritime, 'price' => 3500, 'label' => 'Groupage, par kg']],
+                'countries' => ['FR', 'GA'],
             ],
-            // ── France → RDC ──
+            // ── Chine → Gabon ──
             [
-                'name' => 'France → RDC (aérien 1–10 kg)',
-                'description' => 'Fret aérien Paris – Kinshasa, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 20.00, 'label' => '1–10 kg']],
-                'countries' => ['FR', 'CD'],
-            ],
-            [
-                'name' => 'France → RDC (aérien +10 kg)',
-                'description' => 'Fret aérien Paris – Kinshasa, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 15.00, 'label' => '+10 kg']],
-                'countries' => ['FR', 'CD'],
+                'name' => 'Chine → Gabon (aérien)',
+                'description' => 'Fret aérien Guangzhou – Libreville.',
+                'rates' => [['mode' => $aerien, 'price' => 9500, 'label' => 'Par kilo']],
+                'countries' => ['CN', 'GA'],
             ],
             [
-                'name' => 'France → RDC (maritime)',
-                'description' => 'Fret maritime Paris – Kinshasa.',
-                'rates' => [['mode' => $maritime, 'price' => 16.00, 'label' => 'Par volume']],
-                'countries' => ['FR', 'CD'],
+                'name' => 'Chine → Gabon (maritime)',
+                'description' => 'Fret maritime Guangzhou (Nansha) – Owendo (groupage).',
+                'rates' => [['mode' => $maritime, 'price' => 2500, 'label' => 'Groupage, par kg']],
+                'countries' => ['CN', 'GA'],
             ],
-            // ── Chine → RDC ──
+            // ── Émirats arabes unis → Gabon ──
             [
-                'name' => 'Chine → RDC (aérien)',
-                'description' => 'Fret aérien Guangzhou – Kinshasa.',
-                'rates' => [['mode' => $aerien, 'price' => 17.00, 'label' => 'Par kilo']],
-                'countries' => ['CN', 'CD'],
-            ],
-            [
-                'name' => 'Chine → RDC (maritime)',
-                'description' => 'Fret maritime Guangzhou – Kinshasa.',
-                'rates' => [['mode' => $maritime, 'price' => 12.00, 'label' => 'Par volume']],
-                'countries' => ['CN', 'CD'],
-            ],
-            // ── USA → RDC ──
-            [
-                'name' => 'USA → RDC (aérien 1–10 kg)',
-                'description' => 'Fret aérien Miami – Kinshasa, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 30.00, 'label' => '1–10 kg']],
-                'countries' => ['US', 'CD'],
+                'name' => 'Dubaï → Gabon (aérien 1–10 kg)',
+                'description' => 'Fret aérien Dubaï – Libreville, colis de 1 à 10 kg.',
+                'rates' => [['mode' => $aerien, 'price' => 7900, 'label' => '1–10 kg']],
+                'countries' => ['AE', 'GA'],
             ],
             [
-                'name' => 'USA → RDC (aérien +10 kg)',
-                'description' => 'Fret aérien Miami – Kinshasa, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 25.00, 'label' => '+10 kg']],
-                'countries' => ['US', 'CD'],
-            ],
-            // ── Canada → RDC ──
-            [
-                'name' => 'Canada → RDC (aérien 1–10 kg)',
-                'description' => 'Fret aérien Montréal – Kinshasa, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 30.00, 'label' => '1–10 kg']],
-                'countries' => ['CA', 'CD'],
+                'name' => 'Dubaï → Gabon (aérien +10 kg)',
+                'description' => 'Fret aérien Dubaï – Libreville, colis de plus de 10 kg.',
+                'rates' => [['mode' => $aerien, 'price' => 6500, 'label' => '+10 kg']],
+                'countries' => ['AE', 'GA'],
             ],
             [
-                'name' => 'Canada → RDC (aérien +10 kg)',
-                'description' => 'Fret aérien Montréal – Kinshasa, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 25.00, 'label' => '+10 kg']],
-                'countries' => ['CA', 'CD'],
+                'name' => 'Dubaï → Gabon (maritime)',
+                'description' => 'Fret maritime Jebel Ali – Owendo (groupage).',
+                'rates' => [['mode' => $maritime, 'price' => 3000, 'label' => 'Groupage, par kg']],
+                'countries' => ['AE', 'GA'],
             ],
-            // ── Allemagne → RDC ──
+            // ── USA → Gabon ──
             [
-                'name' => 'Allemagne → RDC (aérien 1–10 kg)',
-                'description' => 'Fret aérien Allemagne – Kinshasa, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 20.00, 'label' => '1–10 kg']],
-                'countries' => ['DE', 'CD'],
-            ],
-            [
-                'name' => 'Allemagne → RDC (aérien +10 kg)',
-                'description' => 'Fret aérien Allemagne – Kinshasa, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 15.00, 'label' => '+10 kg']],
-                'countries' => ['DE', 'CD'],
-            ],
-            // ── RDC → Belgique ──
-            [
-                'name' => 'RDC → Belgique (aérien 1–10 kg)',
-                'description' => 'Export Kinshasa – Bruxelles, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 15.00, 'label' => '1–10 kg']],
-                'countries' => ['CD', 'BE'],
+                'name' => 'USA → Gabon (aérien 1–10 kg)',
+                'description' => 'Fret aérien Miami – Libreville, colis de 1 à 10 kg.',
+                'rates' => [['mode' => $aerien, 'price' => 13500, 'label' => '1–10 kg']],
+                'countries' => ['US', 'GA'],
             ],
             [
-                'name' => 'RDC → Belgique (aérien +10 kg)',
-                'description' => 'Export Kinshasa – Bruxelles, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 12.00, 'label' => '+10 kg']],
-                'countries' => ['CD', 'BE'],
+                'name' => 'USA → Gabon (aérien +10 kg)',
+                'description' => 'Fret aérien Miami – Libreville, colis de plus de 10 kg.',
+                'rates' => [['mode' => $aerien, 'price' => 11500, 'label' => '+10 kg']],
+                'countries' => ['US', 'GA'],
             ],
-            // ── RDC → France ──
+            // ── Gabon → France ──
             [
-                'name' => 'RDC → France (aérien 1–10 kg)',
-                'description' => 'Export Kinshasa – Paris, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 20.00, 'label' => '1–10 kg']],
-                'countries' => ['CD', 'FR'],
-            ],
-            [
-                'name' => 'RDC → France (aérien +10 kg)',
-                'description' => 'Export Kinshasa – Paris, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 15.00, 'label' => '+10 kg']],
-                'countries' => ['CD', 'FR'],
-            ],
-            // ── RDC → USA ──
-            [
-                'name' => 'RDC → USA (aérien 1–10 kg)',
-                'description' => 'Export Kinshasa – États-Unis, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 30.00, 'label' => '1–10 kg']],
-                'countries' => ['CD', 'US'],
+                'name' => 'Gabon → France (aérien 1–10 kg)',
+                'description' => 'Export Libreville – Paris, colis de 1 à 10 kg.',
+                'rates' => [['mode' => $aerien, 'price' => 9500, 'label' => '1–10 kg']],
+                'countries' => ['GA', 'FR'],
             ],
             [
-                'name' => 'RDC → USA (aérien +10 kg)',
-                'description' => 'Export Kinshasa – États-Unis, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 25.00, 'label' => '+10 kg']],
-                'countries' => ['CD', 'US'],
-            ],
-            // ── RDC → Canada ──
-            [
-                'name' => 'RDC → Canada (aérien 1–10 kg)',
-                'description' => 'Export Kinshasa – Canada, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 30.00, 'label' => '1–10 kg']],
-                'countries' => ['CD', 'CA'],
-            ],
-            [
-                'name' => 'RDC → Canada (aérien +10 kg)',
-                'description' => 'Export Kinshasa – Canada, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 25.00, 'label' => '+10 kg']],
-                'countries' => ['CD', 'CA'],
-            ],
-            // ── RDC → Allemagne ──
-            [
-                'name' => 'RDC → Allemagne (aérien 1–10 kg)',
-                'description' => 'Export Kinshasa – Allemagne, colis de 1 à 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 20.00, 'label' => '1–10 kg']],
-                'countries' => ['CD', 'DE'],
-            ],
-            [
-                'name' => 'RDC → Allemagne (aérien +10 kg)',
-                'description' => 'Export Kinshasa – Allemagne, colis de plus de 10 kg.',
-                'rates' => [['mode' => $aerien, 'price' => 15.00, 'label' => '+10 kg']],
-                'countries' => ['CD', 'DE'],
+                'name' => 'Gabon → France (aérien +10 kg)',
+                'description' => 'Export Libreville – Paris, colis de plus de 10 kg.',
+                'rates' => [['mode' => $aerien, 'price' => 8000, 'label' => '+10 kg']],
+                'countries' => ['GA', 'FR'],
             ],
         ];
 
@@ -462,7 +448,7 @@ class FullPlatformSeeder extends Seeder
             foreach ($lineData['rates'] as $rateData) {
                 ShipLineRate::updateOrCreate(
                     ['ship_line_id' => $line->id, 'shipping_mode_id' => $rateData['mode']->id],
-                    ['unit_price' => $rateData['price'], 'currency' => 'USD', 'is_active' => true, 'delivery_label_override' => $rateData['label']]
+                    ['unit_price' => $rateData['price'], 'currency' => 'XAF', 'is_active' => true, 'delivery_label_override' => $rateData['label']]
                 );
             }
 
@@ -503,7 +489,7 @@ class FullPlatformSeeder extends Seeder
             ['name' => 'Fnac', 'domains' => ['fnac.com', 'fnac.be'], 'logo_url' => 'https://upload.wikimedia.org/wikipedia/commons/2/2e/Fnac_Logo.svg'],
             ['name' => 'Zalando', 'domains' => ['zalando.com', 'zalando.fr', 'zalando.be'], 'logo_url' => 'https://upload.wikimedia.org/wikipedia/commons/0/0b/Zalando_logo.svg'],
             ['name' => 'Wish', 'domains' => ['wish.com'], 'logo_url' => 'https://upload.wikimedia.org/wikipedia/commons/6/6f/Wish_logo.svg'],
-            ['name' => 'Jumia', 'domains' => ['jumia.com', 'jumia.cd', 'jumia.com.ng'], 'logo_url' => 'https://upload.wikimedia.org/wikipedia/commons/0/01/Jumia_logo.svg'],
+            ['name' => 'Jumia', 'domains' => ['jumia.com', 'jumia.ci', 'jumia.com.ng'], 'logo_url' => 'https://upload.wikimedia.org/wikipedia/commons/0/01/Jumia_logo.svg'],
             ['name' => 'DHgate', 'domains' => ['dhgate.com'], 'logo_url' => null],
             ['name' => 'Banggood', 'domains' => ['banggood.com'], 'logo_url' => null],
             ['name' => 'iHerb', 'domains' => ['iherb.com'], 'logo_url' => null],
@@ -526,7 +512,8 @@ class FullPlatformSeeder extends Seeder
 
         $companies = [
             ['name' => 'La Poste France', 'is_active' => true],
-            ['name' => 'Bpost (Belgique)', 'is_active' => true],
+            ['name' => 'Gabon Poste', 'is_active' => true],
+            ['name' => 'Emirates SkyCargo', 'is_active' => true],
             ['name' => 'Aramex', 'is_active' => true],
             ['name' => 'USPS', 'is_active' => true],
             ['name' => 'TNT', 'is_active' => true],
@@ -551,9 +538,9 @@ class FullPlatformSeeder extends Seeder
     private function seedAdditionalPackagingTypes(): void
     {
         $additional = [
-            ['name' => 'Enveloppe matelassée', 'is_active' => true, 'sort_order' => 6, 'is_billable' => true, 'unit_price' => 2.00],
-            ['name' => 'Caisse en bois', 'is_active' => true, 'sort_order' => 7, 'is_billable' => true, 'unit_price' => 35.00],
-            ['name' => 'Film étirable', 'is_active' => true, 'sort_order' => 8, 'is_billable' => true, 'unit_price' => 3.00],
+            ['name' => 'Enveloppe matelassée', 'is_active' => true, 'sort_order' => 6, 'is_billable' => true, 'unit_price' => 1300.00],
+            ['name' => 'Caisse en bois', 'is_active' => true, 'sort_order' => 7, 'is_billable' => true, 'unit_price' => 23000.00],
+            ['name' => 'Film étirable', 'is_active' => true, 'sort_order' => 8, 'is_billable' => true, 'unit_price' => 2000.00],
             ['name' => 'Conteneur 20 pieds', 'is_active' => true, 'sort_order' => 9, 'is_billable' => true, 'unit_price' => 0.00],
             ['name' => 'Conteneur 40 pieds', 'is_active' => true, 'sort_order' => 10, 'is_billable' => true, 'unit_price' => 0.00],
         ];
@@ -569,41 +556,41 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Méthodes de paiement…');
 
-        $kinshasa = Agency::where('code', 'KIN')->first();
-        $bruxelles = Agency::where('code', 'BXL')->first();
+        $libreville = Agency::where('code', 'LBV')->first();
+        $portGentil = Agency::where('code', 'POG')->first();
+        $paris = Agency::where('code', 'PAR')->first();
 
-        $methodsKin = [
-            ['code' => 'mpesa', 'name' => 'M-Pesa (Vodacom)', 'instructions' => 'Envoyez le montant au +243 9000 777 84 via M-Pesa. Conservez la confirmation.', 'currency' => 'CDF', 'sort_order' => 1],
-            ['code' => 'orange_money', 'name' => 'Orange Money', 'instructions' => 'Envoyez le montant via Orange Money. Conservez le code de transaction.', 'currency' => 'CDF', 'sort_order' => 2],
-            ['code' => 'airtel_money', 'name' => 'Airtel Money', 'instructions' => 'Envoyez le montant via Airtel Money. Conservez le reçu.', 'currency' => 'CDF', 'sort_order' => 3],
-            ['code' => 'afrimoney', 'name' => 'AfriMoney', 'instructions' => 'Envoyez le montant via AfriMoney.', 'currency' => 'CDF', 'sort_order' => 4],
-            ['code' => 'cash_usd', 'name' => 'Espèces (USD)', 'instructions' => 'Paiement en espèces USD à notre bureau de Kinshasa.', 'currency' => 'USD', 'sort_order' => 5],
-            ['code' => 'cash_cdf', 'name' => 'Espèces (CDF)', 'instructions' => 'Paiement en espèces CDF à notre bureau de Kinshasa.', 'currency' => 'CDF', 'sort_order' => 6],
-            ['code' => 'bank_transfer_usd', 'name' => 'Virement bancaire (USD)', 'instructions' => 'Virement vers notre compte en USD. Les détails vous seront communiqués.', 'currency' => 'USD', 'sort_order' => 7],
-            ['code' => 'bank_transfer_cdf', 'name' => 'Virement bancaire (CDF)', 'instructions' => 'Virement vers notre compte en CDF.', 'currency' => 'CDF', 'sort_order' => 8],
+        $methodsGabon = [
+            ['code' => 'airtel_money', 'name' => 'Airtel Money', 'instructions' => 'Envoyez le montant au +241 077 44 20 00 via Airtel Money. Conservez le SMS de confirmation.', 'currency' => 'XAF', 'sort_order' => 1],
+            ['code' => 'moov_money', 'name' => 'Moov Money', 'instructions' => 'Envoyez le montant au +241 066 44 20 00 via Moov Money. Conservez le code de transaction.', 'currency' => 'XAF', 'sort_order' => 2],
+            ['code' => 'cash_xaf', 'name' => 'Espèces (FCFA)', 'instructions' => 'Paiement en espèces FCFA au comptoir de votre agence Kotinda.', 'currency' => 'XAF', 'sort_order' => 3],
+            ['code' => 'bank_transfer_xaf', 'name' => 'Virement bancaire (FCFA)', 'instructions' => 'Virement vers notre compte BGFIBank Gabon. Les coordonnées vous seront communiquées.', 'currency' => 'XAF', 'sort_order' => 4],
+            ['code' => 'card', 'name' => 'Carte bancaire (Visa/Mastercard)', 'instructions' => 'Paiement par carte via le portail sécurisé ou au terminal de l\'agence.', 'currency' => 'XAF', 'sort_order' => 5],
         ];
 
-        $methodsBxl = [
-            ['code' => 'bank_transfer_eur', 'name' => 'Virement bancaire (EUR)', 'instructions' => 'Virement SEPA vers notre compte bancaire belge.', 'currency' => 'EUR', 'sort_order' => 1],
+        $methodsParis = [
+            ['code' => 'bank_transfer_eur', 'name' => 'Virement bancaire (EUR)', 'instructions' => 'Virement SEPA vers notre compte bancaire en France.', 'currency' => 'EUR', 'sort_order' => 1],
             ['code' => 'card', 'name' => 'Carte bancaire (Visa/Mastercard)', 'instructions' => 'Paiement par carte via le portail sécurisé.', 'currency' => 'EUR', 'sort_order' => 2],
-            ['code' => 'paypal', 'name' => 'PayPal', 'instructions' => 'Paiement via PayPal à payments@monrespro.com.', 'currency' => 'EUR', 'sort_order' => 3],
-            ['code' => 'cash_eur', 'name' => 'Espèces (EUR)', 'instructions' => 'Paiement en espèces à notre bureau de Bruxelles.', 'currency' => 'EUR', 'sort_order' => 4],
+            ['code' => 'paypal', 'name' => 'PayPal', 'instructions' => 'Paiement via PayPal à payments@kotinda.ga.', 'currency' => 'EUR', 'sort_order' => 3],
         ];
 
-        if ($kinshasa) {
-            foreach ($methodsKin as $m) {
-                PaymentMethod::updateOrCreate(
-                    ['agency_id' => $kinshasa->id, 'code' => $m['code']],
-                    array_merge($m, ['agency_id' => $kinshasa->id, 'is_active' => true])
-                );
-            }
-        }
+        $byAgency = [
+            [$libreville, $methodsGabon],
+            [$portGentil, $methodsGabon],
+            [$paris, $methodsParis],
+        ];
 
-        if ($bruxelles) {
-            foreach ($methodsBxl as $m) {
+        foreach ($byAgency as [$agency, $methods]) {
+            if (! $agency) {
+                continue;
+            }
+            foreach ($methods as $m) {
+                $instructions = $agency->code === 'POG'
+                    ? str_replace('+241 077 44 20 00', '+241 077 55 30 00', str_replace('+241 066 44 20 00', '+241 066 55 30 00', $m['instructions']))
+                    : $m['instructions'];
                 PaymentMethod::updateOrCreate(
-                    ['agency_id' => $bruxelles->id, 'code' => $m['code']],
-                    array_merge($m, ['agency_id' => $bruxelles->id, 'is_active' => true])
+                    ['agency_id' => $agency->id, 'code' => $m['code']],
+                    array_merge($m, ['instructions' => $instructions, 'agency_id' => $agency->id, 'is_active' => true])
                 );
             }
         }
@@ -615,33 +602,45 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Coordonnées de paiement…');
 
-        $kinshasa = Agency::where('code', 'KIN')->first();
-        $bruxelles = Agency::where('code', 'BXL')->first();
+        $libreville = Agency::where('code', 'LBV')->first();
+        $portGentil = Agency::where('code', 'POG')->first();
+        $paris = Agency::where('code', 'PAR')->first();
 
-        if ($kinshasa) {
+        if ($libreville) {
             AgencyPaymentCoordinate::updateOrCreate(
-                ['agency_id' => $kinshasa->id, 'label' => 'Mobile Money'],
+                ['agency_id' => $libreville->id, 'label' => 'Mobile Money'],
                 [
-                    'details' => "M-Pesa : +243 9000 777 84\nOrange Money : +243 9000 777 84\nAirtel Money : +243 9000 777 84",
+                    'details' => "Airtel Money : +241 077 44 20 00\nMoov Money : +241 066 44 20 00\nBénéficiaire : Kotinda SARL",
                     'sort_order' => 1,
                     'is_active' => true,
                 ]
             );
             AgencyPaymentCoordinate::updateOrCreate(
-                ['agency_id' => $kinshasa->id, 'label' => 'Compte bancaire USD'],
+                ['agency_id' => $libreville->id, 'label' => 'Compte bancaire FCFA'],
                 [
-                    'details' => "Banque : [À compléter]\nCompte : [À compléter]\nBénéficiaire : Monrespro Logistics SARL",
+                    'details' => "Banque : BGFIBank Gabon [À compléter]\nCompte : [À compléter]\nBénéficiaire : Kotinda SARL",
                     'sort_order' => 2,
                     'is_active' => true,
                 ]
             );
         }
 
-        if ($bruxelles) {
+        if ($portGentil) {
             AgencyPaymentCoordinate::updateOrCreate(
-                ['agency_id' => $bruxelles->id, 'label' => 'Compte bancaire EUR (SEPA)'],
+                ['agency_id' => $portGentil->id, 'label' => 'Mobile Money'],
                 [
-                    'details' => "IBAN : [À compléter]\nBIC : [À compléter]\nBénéficiaire : Monrespro Logistics\nBanque : [À compléter]",
+                    'details' => "Airtel Money : +241 077 55 30 00\nMoov Money : +241 066 55 30 00\nBénéficiaire : Kotinda SARL",
+                    'sort_order' => 1,
+                    'is_active' => true,
+                ]
+            );
+        }
+
+        if ($paris) {
+            AgencyPaymentCoordinate::updateOrCreate(
+                ['agency_id' => $paris->id, 'label' => 'Compte bancaire EUR (SEPA)'],
+                [
+                    'details' => "IBAN : [À compléter]\nBIC : [À compléter]\nBénéficiaire : Kotinda\nBanque : [À compléter]",
                     'sort_order' => 1,
                     'is_active' => true,
                 ]
@@ -656,15 +655,18 @@ class FullPlatformSeeder extends Seeder
         $this->command?->info('Taux de change…');
 
         $rates = [
-            ['from_currency' => 'USD', 'to_currency' => 'CDF', 'rate' => 2800.00],
-            ['from_currency' => 'EUR', 'to_currency' => 'USD', 'rate' => 1.08],
-            ['from_currency' => 'EUR', 'to_currency' => 'CDF', 'rate' => 3024.00],
-            ['from_currency' => 'GBP', 'to_currency' => 'USD', 'rate' => 1.26],
-            ['from_currency' => 'CAD', 'to_currency' => 'USD', 'rate' => 0.74],
-            ['from_currency' => 'CHF', 'to_currency' => 'USD', 'rate' => 1.12],
+            // Parité fixe du franc CFA (BEAC) : 1 EUR = 655,957 XAF
+            ['from_currency' => 'EUR', 'to_currency' => 'XAF', 'rate' => 655.957],
+            ['from_currency' => 'USD', 'to_currency' => 'XAF', 'rate' => 600.00],
+            ['from_currency' => 'CNY', 'to_currency' => 'XAF', 'rate' => 84.00],
+            ['from_currency' => 'AED', 'to_currency' => 'XAF', 'rate' => 163.00],
+            ['from_currency' => 'GBP', 'to_currency' => 'XAF', 'rate' => 765.00],
+            ['from_currency' => 'CAD', 'to_currency' => 'XAF', 'rate' => 440.00],
+            ['from_currency' => 'XAF', 'to_currency' => 'EUR', 'rate' => 0.001524],
+            ['from_currency' => 'XAF', 'to_currency' => 'USD', 'rate' => 0.001667],
+            ['from_currency' => 'EUR', 'to_currency' => 'USD', 'rate' => 1.09],
             ['from_currency' => 'CNY', 'to_currency' => 'USD', 'rate' => 0.14],
-            ['from_currency' => 'JPY', 'to_currency' => 'USD', 'rate' => 0.0067],
-            ['from_currency' => 'AUD', 'to_currency' => 'USD', 'rate' => 0.66],
+            ['from_currency' => 'AED', 'to_currency' => 'USD', 'rate' => 0.27],
         ];
 
         foreach ($rates as $rate) {
@@ -692,7 +694,7 @@ class FullPlatformSeeder extends Seeder
             ['name' => 'Auto & Moto', 'description' => 'Pièces détachées, accessoires automobiles', 'sort_order' => 8],
             ['name' => 'Machines & Équipements industriels', 'description' => 'Machines, outils, équipements professionnels', 'sort_order' => 9],
             ['name' => 'Jouets & Enfants', 'description' => 'Jouets, jeux, articles pour bébé', 'sort_order' => 10],
-            ['name' => 'Bijoux & Montres', 'description' => 'Bijoux, montres (valeur < 1000 $)', 'sort_order' => 11],
+            ['name' => 'Bijoux & Montres', 'description' => 'Bijoux, montres (valeur < 650 000 FCFA)', 'sort_order' => 11],
             ['name' => 'Audio & Vidéo', 'description' => 'TVs, enceintes, casques, caméras', 'sort_order' => 12],
             ['name' => 'Matériaux de construction', 'description' => 'Pierre, plâtre, ciment, verre, ouvrages similaires', 'sort_order' => 13],
             ['name' => 'Produits chimiques', 'description' => 'Produits chimiques, peintures, vernis (non dangereux)', 'sort_order' => 14],
@@ -715,27 +717,30 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Suppléments de facturation…');
 
-        $kinshasa = Agency::where('code', 'KIN')->first();
-        if (! $kinshasa) {
+        $agencies = Agency::whereIn('code', ['LBV', 'POG'])->get();
+        if ($agencies->isEmpty()) {
             return;
         }
 
+        // Montants fixes en XAF (FCFA)
         $extras = [
-            ['label' => 'Assurance transport', 'calculation_description' => '2% de la valeur déclarée', 'type' => 'percentage', 'value' => 2.0000, 'sort_order' => 1],
-            ['label' => 'Frais de dédouanement', 'calculation_description' => 'Frais fixes de traitement douanier', 'type' => 'fixed', 'value' => 25.0000, 'sort_order' => 2],
-            ['label' => 'Emballage spécial', 'calculation_description' => 'Surcoût pour emballage fragile/renforcé', 'type' => 'fixed', 'value' => 15.0000, 'sort_order' => 3],
-            ['label' => 'Livraison porte-à-porte', 'calculation_description' => 'Livraison finale au domicile du client', 'type' => 'fixed', 'value' => 10.0000, 'sort_order' => 4],
-            ['label' => 'Stockage prolongé (par jour)', 'calculation_description' => 'Au-delà de 45 jours gratuits', 'type' => 'fixed', 'value' => 2.0000, 'sort_order' => 5],
-            ['label' => 'Commission achat assisté', 'calculation_description' => '7% du prix d\'achat (min 10 EUR)', 'type' => 'percentage', 'value' => 7.0000, 'sort_order' => 6],
-            ['label' => 'Frais de regroupement', 'calculation_description' => 'Consolidation de plusieurs colis', 'type' => 'fixed', 'value' => 5.0000, 'sort_order' => 7],
+            ['label' => 'Assurance transport', 'calculation_description' => '2 % de la valeur déclarée', 'type' => 'percentage', 'value' => 2.0000, 'sort_order' => 1],
+            ['label' => 'Frais de dédouanement', 'calculation_description' => 'Frais fixes de traitement douanier (hors droits et taxes)', 'type' => 'fixed', 'value' => 15000.0000, 'sort_order' => 2],
+            ['label' => 'Emballage spécial', 'calculation_description' => 'Surcoût pour emballage fragile/renforcé', 'type' => 'fixed', 'value' => 10000.0000, 'sort_order' => 3],
+            ['label' => 'Livraison porte-à-porte', 'calculation_description' => 'Livraison finale au domicile du client', 'type' => 'fixed', 'value' => 5000.0000, 'sort_order' => 4],
+            ['label' => 'Stockage prolongé (par jour)', 'calculation_description' => 'Au-delà de 45 jours gratuits', 'type' => 'fixed', 'value' => 1000.0000, 'sort_order' => 5],
+            ['label' => 'Commission achat assisté', 'calculation_description' => '7 % du prix d\'achat (minimum 6 500 FCFA)', 'type' => 'percentage', 'value' => 7.0000, 'sort_order' => 6],
+            ['label' => 'Frais de regroupement', 'calculation_description' => 'Consolidation de plusieurs colis', 'type' => 'fixed', 'value' => 3000.0000, 'sort_order' => 7],
             ['label' => 'Taxe carburant', 'calculation_description' => 'Surcharge carburant aérien', 'type' => 'percentage', 'value' => 3.0000, 'sort_order' => 8],
         ];
 
-        foreach ($extras as $extra) {
-            BillingExtra::updateOrCreate(
-                ['agency_id' => $kinshasa->id, 'label' => $extra['label']],
-                array_merge($extra, ['agency_id' => $kinshasa->id, 'is_active' => true])
-            );
+        foreach ($agencies as $agency) {
+            foreach ($extras as $extra) {
+                BillingExtra::updateOrCreate(
+                    ['agency_id' => $agency->id, 'label' => $extra['label']],
+                    array_merge($extra, ['agency_id' => $agency->id, 'is_active' => true])
+                );
+            }
         }
     }
 
@@ -745,52 +750,59 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Zones et règles de tarification…');
 
-        $kinshasa = Agency::where('code', 'KIN')->first();
-        if (! $kinshasa) {
+        $libreville = Agency::where('code', 'LBV')->first();
+        $portGentil = Agency::where('code', 'POG')->first();
+        if (! $libreville) {
             return;
         }
 
+        // Formules en FCFA (XAF) par kg
         $zones = [
             [
-                'name' => 'Zone Kinshasa Centre',
-                'polygon' => [[-4.30, 15.25], [-4.30, 15.35], [-4.35, 15.35], [-4.35, 15.25]],
+                'agency' => $libreville,
+                'name' => 'Zone Libreville Centre (Louis, Glass, Nzeng-Ayong)',
+                'polygon' => [[0.43, 9.42], [0.43, 9.48], [0.36, 9.48], [0.36, 9.42]],
                 'rules' => [
-                    ['name' => 'Livraison Kinshasa Centre', 'formula' => 'weight_kg * 3', 'conditions' => ['min_weight' => 0, 'max_weight' => 50], 'priority' => 1],
+                    ['name' => 'Livraison Libreville Centre', 'formula' => 'weight_kg * 500 + 2000', 'conditions' => ['min_weight' => 0, 'max_weight' => 50], 'priority' => 1],
                 ],
             ],
             [
-                'name' => 'Zone Kinshasa Périphérie',
-                'polygon' => [[-4.25, 15.15], [-4.25, 15.45], [-4.45, 15.45], [-4.45, 15.15]],
+                'agency' => $libreville,
+                'name' => 'Zone Grand Libreville (Akanda, Owendo)',
+                'polygon' => [[0.55, 9.36], [0.55, 9.56], [0.26, 9.56], [0.26, 9.36]],
                 'rules' => [
-                    ['name' => 'Livraison Kinshasa Périphérie', 'formula' => 'weight_kg * 5', 'conditions' => ['min_weight' => 0, 'max_weight' => 50], 'priority' => 1],
+                    ['name' => 'Livraison Akanda / Owendo', 'formula' => 'weight_kg * 750 + 3000', 'conditions' => ['min_weight' => 0, 'max_weight' => 50], 'priority' => 1],
                 ],
             ],
             [
-                'name' => 'Zone Haut-Katanga (Lubumbashi)',
-                'polygon' => [[-11.50, 27.40], [-11.50, 27.60], [-11.80, 27.60], [-11.80, 27.40]],
+                'agency' => $portGentil ?? $libreville,
+                'name' => 'Zone Port-Gentil',
+                'polygon' => [[-0.64, 8.70], [-0.64, 8.83], [-0.78, 8.83], [-0.78, 8.70]],
                 'rules' => [
-                    ['name' => 'Livraison Lubumbashi', 'formula' => 'weight_kg * 7', 'conditions' => ['min_weight' => 0], 'priority' => 1],
+                    ['name' => 'Livraison Port-Gentil', 'formula' => 'weight_kg * 500 + 2000', 'conditions' => ['min_weight' => 0], 'priority' => 1],
                 ],
             ],
             [
-                'name' => 'Zone Inter-Province RDC',
+                'agency' => $libreville,
+                'name' => 'Zone intérieur du pays (Franceville, Oyem, Lambaréné…)',
                 'polygon' => [],
                 'rules' => [
-                    ['name' => 'Livraison inter-province', 'formula' => 'weight_kg * 10', 'conditions' => ['min_weight' => 0], 'priority' => 10],
+                    ['name' => 'Livraison intérieur du pays', 'formula' => 'weight_kg * 1500 + 5000', 'conditions' => ['min_weight' => 0], 'priority' => 10],
                 ],
             ],
         ];
 
         foreach ($zones as $zoneData) {
+            $agency = $zoneData['agency'];
             $zone = Zone::updateOrCreate(
-                ['agency_id' => $kinshasa->id, 'name' => $zoneData['name']],
-                ['polygon' => $zoneData['polygon'], 'is_active' => true, 'agency_id' => $kinshasa->id]
+                ['agency_id' => $agency->id, 'name' => $zoneData['name']],
+                ['polygon' => $zoneData['polygon'], 'is_active' => true, 'agency_id' => $agency->id]
             );
 
             foreach ($zoneData['rules'] as $ruleData) {
                 PricingRule::updateOrCreate(
-                    ['agency_id' => $kinshasa->id, 'zone_id' => $zone->id, 'name' => $ruleData['name']],
-                    array_merge($ruleData, ['agency_id' => $kinshasa->id, 'zone_id' => $zone->id, 'is_active' => true])
+                    ['agency_id' => $agency->id, 'zone_id' => $zone->id, 'name' => $ruleData['name']],
+                    array_merge($ruleData, ['agency_id' => $agency->id, 'zone_id' => $zone->id, 'is_active' => true])
                 );
             }
         }
@@ -802,7 +814,7 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Modèles de lignes de devis…');
 
-        $kinshasa = Agency::where('code', 'KIN')->first();
+        $libreville = Agency::where('code', 'LBV')->first();
 
         // Enum valides → type: percentage|fixed_amount|manual
         //                 calculation_base: product_price|subtotal_after_commission (nullable)
@@ -827,7 +839,7 @@ class FullPlatformSeeder extends Seeder
             [
                 'internal_code' => 'COMMISSION',
                 'name' => 'Commission de service',
-                'description' => '7% du prix d\'achat (minimum 10 EUR)',
+                'description' => '7 % du prix d\'achat (minimum 6 500 FCFA)',
                 'type' => 'percentage',
                 'calculation_base' => 'product_price',
                 'default_value' => 7.00,
@@ -843,7 +855,7 @@ class FullPlatformSeeder extends Seeder
                 'description' => 'Coût du transport international basé sur le poids/volume',
                 'type' => 'fixed_amount',
                 'calculation_base' => null,
-                'default_value' => 15.00,
+                'default_value' => 10000.00,
                 'is_mandatory' => false,
                 'is_visible_to_client' => true,
                 'display_order' => 3,
@@ -853,10 +865,10 @@ class FullPlatformSeeder extends Seeder
             [
                 'internal_code' => 'CUSTOMS',
                 'name' => 'Frais de dédouanement',
-                'description' => 'Formalités douanières RDC',
+                'description' => 'Formalités douanières au Gabon (hors droits et taxes)',
                 'type' => 'fixed_amount',
                 'calculation_base' => null,
-                'default_value' => 25.00,
+                'default_value' => 15000.00,
                 'is_mandatory' => false,
                 'is_visible_to_client' => true,
                 'display_order' => 4,
@@ -882,7 +894,7 @@ class FullPlatformSeeder extends Seeder
                 'description' => 'Frais d\'emballage et conditionnement',
                 'type' => 'fixed_amount',
                 'calculation_base' => null,
-                'default_value' => 5.00,
+                'default_value' => 3000.00,
                 'is_mandatory' => false,
                 'is_visible_to_client' => true,
                 'display_order' => 6,
@@ -895,7 +907,7 @@ class FullPlatformSeeder extends Seeder
                 'description' => 'Livraison finale au domicile du destinataire',
                 'type' => 'fixed_amount',
                 'calculation_base' => null,
-                'default_value' => 10.00,
+                'default_value' => 5000.00,
                 'is_mandatory' => false,
                 'is_visible_to_client' => true,
                 'display_order' => 7,
@@ -908,7 +920,7 @@ class FullPlatformSeeder extends Seeder
                 'description' => 'Consolidation de plusieurs achats en un seul envoi',
                 'type' => 'fixed_amount',
                 'calculation_base' => null,
-                'default_value' => 5.00,
+                'default_value' => 3000.00,
                 'is_mandatory' => false,
                 'is_visible_to_client' => true,
                 'display_order' => 8,
@@ -930,11 +942,12 @@ class FullPlatformSeeder extends Seeder
             ],
         ];
 
-        $bruxelles = Agency::where('code', 'BXL')->first();
+        $portGentil = Agency::where('code', 'POG')->first();
         $paris = Agency::where('code', 'PAR')->first();
         $guangzhou = Agency::where('code', 'GZH')->first();
+        $dubai = Agency::where('code', 'DXB')->first();
 
-        $agencies = array_filter([$kinshasa, $bruxelles, $paris, $guangzhou]);
+        $agencies = array_filter([$libreville, $portGentil, $paris, $guangzhou, $dubai]);
 
         foreach ($agencies as $agency) {
             foreach ($templates as $tpl) {
@@ -952,7 +965,7 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Modèles de devis…');
 
-        $agencies = Agency::whereIn('code', ['KIN', 'BXL', 'PAR', 'GZH'])->where('is_active', true)->get();
+        $agencies = Agency::whereIn('code', ['LBV', 'POG', 'PAR', 'GZH', 'DXB'])->where('is_active', true)->get();
 
         if ($agencies->isEmpty()) {
             return;
@@ -1021,7 +1034,7 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Templates e-mail devis…');
 
-        $agencies = Agency::whereIn('code', ['KIN', 'BXL', 'PAR', 'GZH'])->where('is_active', true)->get();
+        $agencies = Agency::whereIn('code', ['LBV', 'POG', 'PAR', 'GZH', 'DXB'])->where('is_active', true)->get();
 
         if ($agencies->isEmpty()) {
             return;
@@ -1156,7 +1169,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'mail'],
                 'subject' => 'Votre envoi {{tracking_number}} a été créé',
                 'body' => 'Bonjour {{recipient_name}}, votre envoi {{tracking_number}} a été créé et est en attente de dépôt.',
-                'sample_variables' => ['tracking_number' => 'MRP-2026-001', 'recipient_name' => 'Jean Dupont'],
+                'sample_variables' => ['tracking_number' => 'KTD-2026-001', 'recipient_name' => 'Christelle Nzé'],
             ],
             [
                 'slug' => 'shipment_received_at_hub',
@@ -1166,7 +1179,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'mail', 'sms'],
                 'subject' => 'Votre colis {{tracking_number}} est arrivé dans notre entrepôt',
                 'body' => 'Bonjour {{recipient_name}}, votre colis {{tracking_number}} a été réceptionné dans notre entrepôt {{hub_name}}.',
-                'sample_variables' => ['tracking_number' => 'MRP-2026-001', 'recipient_name' => 'Jean Dupont', 'hub_name' => 'Entrepôt Bruxelles'],
+                'sample_variables' => ['tracking_number' => 'KTD-2026-001', 'recipient_name' => 'Christelle Nzé', 'hub_name' => 'Entrepôt Paris'],
             ],
             [
                 'slug' => 'shipment_in_transit',
@@ -1176,7 +1189,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'mail'],
                 'subject' => 'Votre colis {{tracking_number}} est en route',
                 'body' => 'Votre colis {{tracking_number}} est parti de {{origin}} vers {{destination}}. Arrivée estimée : {{eta}}.',
-                'sample_variables' => ['tracking_number' => 'MRP-2026-001', 'origin' => 'Bruxelles', 'destination' => 'Kinshasa', 'eta' => '7-10 jours'],
+                'sample_variables' => ['tracking_number' => 'KTD-2026-001', 'origin' => 'Paris', 'destination' => 'Libreville', 'eta' => '7-10 jours'],
             ],
             [
                 'slug' => 'shipment_customs_hold',
@@ -1186,7 +1199,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'mail'],
                 'subject' => 'Votre colis {{tracking_number}} est en cours de dédouanement',
                 'body' => 'Votre colis {{tracking_number}} est actuellement en cours de dédouanement. Nous vous tiendrons informé de l\'avancement.',
-                'sample_variables' => ['tracking_number' => 'MRP-2026-001'],
+                'sample_variables' => ['tracking_number' => 'KTD-2026-001'],
             ],
             [
                 'slug' => 'shipment_arrived',
@@ -1196,7 +1209,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'mail', 'sms'],
                 'subject' => 'Votre colis {{tracking_number}} est arrivé !',
                 'body' => 'Bonne nouvelle ! Votre colis {{tracking_number}} est arrivé à {{destination}}. Vous pouvez le récupérer ou planifier une livraison.',
-                'sample_variables' => ['tracking_number' => 'MRP-2026-001', 'destination' => 'Kinshasa'],
+                'sample_variables' => ['tracking_number' => 'KTD-2026-001', 'destination' => 'Libreville'],
             ],
             [
                 'slug' => 'shipment_delivered',
@@ -1205,8 +1218,8 @@ class FullPlatformSeeder extends Seeder
                 'channel' => 'database',
                 'channels' => ['database', 'mail', 'sms'],
                 'subject' => 'Votre colis {{tracking_number}} a été livré',
-                'body' => 'Votre colis {{tracking_number}} a été livré avec succès. Merci d\'avoir choisi Monrespro Logistics !',
-                'sample_variables' => ['tracking_number' => 'MRP-2026-001'],
+                'body' => 'Votre colis {{tracking_number}} a été livré avec succès. Merci d\'avoir choisi Kotinda !',
+                'sample_variables' => ['tracking_number' => 'KTD-2026-001'],
             ],
             [
                 'slug' => 'pre_alert_confirmed',
@@ -1226,7 +1239,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'mail'],
                 'subject' => 'Votre devis d\'achat assisté est prêt',
                 'body' => 'Bonjour {{client_name}}, votre devis d\'achat assisté est prêt. Montant total : {{total_amount}} {{currency}}. Consultez-le ici : {{quote_link}}',
-                'sample_variables' => ['client_name' => 'Jean', 'total_amount' => '150.00', 'currency' => 'USD', 'quote_link' => '#'],
+                'sample_variables' => ['client_name' => 'Christelle', 'total_amount' => '68 500', 'currency' => 'XAF', 'quote_link' => '#'],
             ],
             [
                 'slug' => 'assisted_purchase_ordered',
@@ -1246,7 +1259,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'sms'],
                 'subject' => 'Un livreur est en route pour votre ramassage',
                 'body' => 'Le livreur {{driver_name}} ({{driver_phone}}) viendra chercher votre colis. Contactez-le pour confirmer l\'heure.',
-                'sample_variables' => ['driver_name' => 'Patrick', 'driver_phone' => '+243 900 000 000'],
+                'sample_variables' => ['driver_name' => 'Junior', 'driver_phone' => '+241 077 30 00 01'],
             ],
             [
                 'slug' => 'invoice_created',
@@ -1256,7 +1269,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'mail'],
                 'subject' => 'Facture #{{invoice_number}} – {{total_amount}} {{currency}}',
                 'body' => 'Bonjour {{client_name}}, votre facture #{{invoice_number}} d\'un montant de {{total_amount}} {{currency}} est disponible.',
-                'sample_variables' => ['client_name' => 'Jean', 'invoice_number' => 'INV-2026-001', 'total_amount' => '200.00', 'currency' => 'USD'],
+                'sample_variables' => ['client_name' => 'Christelle', 'invoice_number' => 'INV-2026-001', 'total_amount' => '70 000', 'currency' => 'XAF'],
             ],
             [
                 'slug' => 'payment_confirmed',
@@ -1266,7 +1279,7 @@ class FullPlatformSeeder extends Seeder
                 'channels' => ['database', 'mail'],
                 'subject' => 'Paiement de {{amount}} {{currency}} confirmé',
                 'body' => 'Votre paiement de {{amount}} {{currency}} a été confirmé. Merci !',
-                'sample_variables' => ['amount' => '200.00', 'currency' => 'USD'],
+                'sample_variables' => ['amount' => '70 000', 'currency' => 'XAF'],
             ],
         ];
 
@@ -1284,52 +1297,83 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Utilisateurs démo…');
 
-        $kinshasa = Agency::where('code', 'KIN')->first();
-        $bruxelles = Agency::where('code', 'BXL')->first();
+        $libreville = Agency::where('code', 'LBV')->first();
+        $portGentil = Agency::where('code', 'POG')->first();
+        $paris = Agency::where('code', 'PAR')->first();
 
-        if (! $kinshasa) {
+        if (! $libreville) {
             return;
         }
 
+        $lockerAddress = static fn (string $code): string => "Kotinda Hub Paris – Casier {$code}, zone de fret Roissy-CDG, 95700 Roissy-en-France, France";
+
+        // Tous les comptes démo utilisent le mot de passe « password ».
         $demoUsers = [
-            // Agency Admin Kinshasa
+            // Admin d'agence Libreville
             [
                 'profile' => [
-                    'first_name' => 'Patrick',
-                    'last_name' => 'Mwamba',
-                    'email' => 'admin.kin@monrespro.local',
-                    'phone' => '+243 900 100 001',
-                    'agency_id' => $kinshasa->id,
+                    'first_name' => 'Arnaud',
+                    'last_name' => 'Obiang',
+                    'email' => 'admin.lbv@kotinda.local',
+                    'phone' => '+241 077 10 00 01',
+                    'address' => 'Boulevard Triomphal Omar Bongo, quartier Louis, Libreville',
+                    'agency_id' => $libreville->id,
                     'is_active' => true,
                     'is_staff' => true,
                     'is_client' => false,
                 ],
+                'location' => ['GA', 'Libreville'],
                 'user' => [
-                    'name' => 'Patrick Mwamba',
-                    'email' => 'admin.kin@monrespro.local',
+                    'name' => 'Arnaud Obiang',
+                    'email' => 'admin.lbv@kotinda.local',
                     'password' => 'password',
-                    'agency_id' => $kinshasa->id,
+                    'agency_id' => $libreville->id,
                     'theme_preference' => 'light',
                 ],
                 'role' => 'agency_admin',
             ],
-            // Agency Admin Bruxelles
+            // Admin d'agence Port-Gentil
             [
                 'profile' => [
-                    'first_name' => 'Sophie',
-                    'last_name' => 'Laurent',
-                    'email' => 'admin.bxl@monrespro.local',
-                    'phone' => '+32 460 100 001',
-                    'agency_id' => $bruxelles?->id,
+                    'first_name' => 'Sandrine',
+                    'last_name' => 'Moussavou',
+                    'email' => 'admin.pog@kotinda.local',
+                    'phone' => '+241 066 10 00 02',
+                    'address' => 'Avenue Savorgnan de Brazza, quartier Grand Village, Port-Gentil',
+                    'agency_id' => $portGentil?->id,
                     'is_active' => true,
                     'is_staff' => true,
                     'is_client' => false,
                 ],
+                'location' => ['GA', 'Port-Gentil'],
                 'user' => [
-                    'name' => 'Sophie Laurent',
-                    'email' => 'admin.bxl@monrespro.local',
+                    'name' => 'Sandrine Moussavou',
+                    'email' => 'admin.pog@kotinda.local',
                     'password' => 'password',
-                    'agency_id' => $bruxelles?->id,
+                    'agency_id' => $portGentil?->id,
+                    'theme_preference' => 'light',
+                ],
+                'role' => 'agency_admin',
+            ],
+            // Admin du hub d'origine Paris
+            [
+                'profile' => [
+                    'first_name' => 'Laetitia',
+                    'last_name' => 'Mintsa',
+                    'email' => 'admin.par@kotinda.local',
+                    'phone' => '+33 6 12 34 56 78',
+                    'address' => 'Zone de fret Roissy-CDG, 95700 Roissy-en-France',
+                    'agency_id' => $paris?->id,
+                    'is_active' => true,
+                    'is_staff' => true,
+                    'is_client' => false,
+                ],
+                'location' => ['FR', 'Paris'],
+                'user' => [
+                    'name' => 'Laetitia Mintsa',
+                    'email' => 'admin.par@kotinda.local',
+                    'password' => 'password',
+                    'agency_id' => $paris?->id,
                     'theme_preference' => 'light',
                 ],
                 'role' => 'agency_admin',
@@ -1337,20 +1381,22 @@ class FullPlatformSeeder extends Seeder
             // Opérateur
             [
                 'profile' => [
-                    'first_name' => 'David',
-                    'last_name' => 'Kabongo',
-                    'email' => 'operateur@monrespro.local',
-                    'phone' => '+243 900 200 001',
-                    'agency_id' => $kinshasa->id,
+                    'first_name' => 'Davy',
+                    'last_name' => 'Ndong',
+                    'email' => 'operateur@kotinda.local',
+                    'phone' => '+241 077 20 00 01',
+                    'address' => 'Nzeng-Ayong, Libreville',
+                    'agency_id' => $libreville->id,
                     'is_active' => true,
                     'is_staff' => true,
                     'is_client' => false,
                 ],
+                'location' => ['GA', 'Libreville'],
                 'user' => [
-                    'name' => 'David Kabongo',
-                    'email' => 'operateur@monrespro.local',
+                    'name' => 'Davy Ndong',
+                    'email' => 'operateur@kotinda.local',
                     'password' => 'password',
-                    'agency_id' => $kinshasa->id,
+                    'agency_id' => $libreville->id,
                     'theme_preference' => 'system',
                 ],
                 'role' => 'operator',
@@ -1358,24 +1404,27 @@ class FullPlatformSeeder extends Seeder
             // Livreur
             [
                 'profile' => [
-                    'first_name' => 'José',
-                    'last_name' => 'Tshilombo',
-                    'email' => 'livreur@monrespro.local',
-                    'phone' => '+243 900 300 001',
-                    'agency_id' => $kinshasa->id,
+                    'first_name' => 'Junior',
+                    'last_name' => 'Mba',
+                    'email' => 'livreur@kotinda.local',
+                    'phone' => '+241 077 30 00 01',
+                    'address' => 'Owendo, Libreville',
+                    'agency_id' => $libreville->id,
                     'type' => 'driver',
                     'is_active' => true,
                     'is_staff' => true,
                     'is_client' => false,
                     'vehicle_type' => 'Moto',
-                    'vehicle_plate' => 'KIN-1234',
+                    'vehicle_plate' => 'EB-482-AA',
+                    'coverage_zone' => 'Libreville, Akanda, Owendo',
                     'is_available' => true,
                 ],
+                'location' => ['GA', 'Libreville'],
                 'user' => [
-                    'name' => 'José Tshilombo',
-                    'email' => 'livreur@monrespro.local',
+                    'name' => 'Junior Mba',
+                    'email' => 'livreur@kotinda.local',
                     'password' => 'password',
-                    'agency_id' => $kinshasa->id,
+                    'agency_id' => $libreville->id,
                     'theme_preference' => 'system',
                 ],
                 'role' => 'driver',
@@ -1383,105 +1432,161 @@ class FullPlatformSeeder extends Seeder
             // Agent douanier
             [
                 'profile' => [
-                    'first_name' => 'Fiston',
-                    'last_name' => 'Mukendi',
-                    'email' => 'douane@monrespro.local',
-                    'phone' => '+243 900 400 001',
-                    'agency_id' => $kinshasa->id,
+                    'first_name' => 'Hervé',
+                    'last_name' => 'Nguema',
+                    'email' => 'douane@kotinda.local',
+                    'phone' => '+241 077 40 00 01',
+                    'address' => 'Port d\'Owendo, Libreville',
+                    'agency_id' => $libreville->id,
                     'is_active' => true,
                     'is_staff' => true,
                     'is_client' => false,
                 ],
+                'location' => ['GA', 'Libreville'],
                 'user' => [
-                    'name' => 'Fiston Mukendi',
-                    'email' => 'douane@monrespro.local',
+                    'name' => 'Hervé Nguema',
+                    'email' => 'douane@kotinda.local',
                     'password' => 'password',
-                    'agency_id' => $kinshasa->id,
+                    'agency_id' => $libreville->id,
                     'theme_preference' => 'system',
                 ],
                 'role' => 'customs_agent',
             ],
-            // Client 1 – Kinshasa
+            // Agent SAV – Libreville
             [
                 'profile' => [
-                    'first_name' => 'Grace',
-                    'last_name' => 'Kalala',
-                    'email' => 'client1@monrespro.local',
-                    'phone' => '+243 900 500 001',
-                    'agency_id' => $kinshasa->id,
+                    'first_name' => 'Gisèle',
+                    'last_name' => 'Ella',
+                    'email' => 'sav@kotinda.local',
+                    'phone' => '+241 077 40 00 02',
+                    'address' => 'Boulevard Triomphal, quartier Louis, Libreville',
+                    'agency_id' => $libreville->id,
+                    'is_active' => true,
+                    'is_staff' => true,
+                    'is_client' => false,
+                ],
+                'location' => ['GA', 'Libreville'],
+                'user' => [
+                    'name' => 'Gisèle Ella',
+                    'email' => 'sav@kotinda.local',
+                    'password' => 'password',
+                    'agency_id' => $libreville->id,
+                    'theme_preference' => 'system',
+                ],
+                'role' => 'sav_agent',
+            ],
+            // Comptable – Libreville
+            [
+                'profile' => [
+                    'first_name' => 'Patrick',
+                    'last_name' => 'Ekomi',
+                    'email' => 'comptable@kotinda.local',
+                    'phone' => '+241 077 40 00 03',
+                    'address' => 'Boulevard Triomphal, quartier Louis, Libreville',
+                    'agency_id' => $libreville->id,
+                    'is_active' => true,
+                    'is_staff' => true,
+                    'is_client' => false,
+                ],
+                'location' => ['GA', 'Libreville'],
+                'user' => [
+                    'name' => 'Patrick Ekomi',
+                    'email' => 'comptable@kotinda.local',
+                    'password' => 'password',
+                    'agency_id' => $libreville->id,
+                    'theme_preference' => 'system',
+                ],
+                'role' => 'accountant',
+            ],
+            // Client 1 – Libreville
+            [
+                'profile' => [
+                    'first_name' => 'Christelle',
+                    'last_name' => 'Nzé',
+                    'email' => 'client1@kotinda.local',
+                    'phone' => '+241 077 50 00 01',
+                    'address' => 'Rue Pierre Barro, quartier Louis, Libreville',
+                    'agency_id' => $libreville->id,
                     'is_active' => true,
                     'is_staff' => false,
                     'is_client' => true,
                 ],
+                'location' => ['GA', 'Libreville'],
                 'user' => [
-                    'name' => 'Grace Kalala',
-                    'email' => 'client1@monrespro.local',
+                    'name' => 'Christelle Nzé',
+                    'email' => 'client1@kotinda.local',
                     'password' => 'password',
-                    'agency_id' => $kinshasa->id,
+                    'agency_id' => $libreville->id,
                     'theme_preference' => 'system',
                 ],
                 'role' => 'client',
                 'locker' => [
-                    'code' => 'MRP-KIN-0001',
-                    'formatted_address' => 'Monrespro Logistics, Hub Kinshasa, RDC – Casier MRP-KIN-0001',
+                    'code' => 'KTD-LBV-0001',
+                    'formatted_address' => $lockerAddress('KTD-LBV-0001'),
                 ],
             ],
-            // Client 2 – Kinshasa
+            // Client 2 – Libreville (Akanda)
             [
                 'profile' => [
-                    'first_name' => 'Emmanuel',
-                    'last_name' => 'Ngoy',
-                    'email' => 'client2@monrespro.local',
-                    'phone' => '+243 900 500 002',
-                    'agency_id' => $kinshasa->id,
+                    'first_name' => 'Ghislain',
+                    'last_name' => 'Ondo',
+                    'email' => 'client2@kotinda.local',
+                    'phone' => '+241 066 50 00 02',
+                    'address' => 'Angondjé, Akanda (Grand Libreville)',
+                    'agency_id' => $libreville->id,
                     'is_active' => true,
                     'is_staff' => false,
                     'is_client' => true,
                 ],
+                'location' => ['GA', 'Libreville'],
                 'user' => [
-                    'name' => 'Emmanuel Ngoy',
-                    'email' => 'client2@monrespro.local',
+                    'name' => 'Ghislain Ondo',
+                    'email' => 'client2@kotinda.local',
                     'password' => 'password',
-                    'agency_id' => $kinshasa->id,
+                    'agency_id' => $libreville->id,
                     'theme_preference' => 'system',
                 ],
                 'role' => 'client',
                 'locker' => [
-                    'code' => 'MRP-KIN-0002',
-                    'formatted_address' => 'Monrespro Logistics, Hub Kinshasa, RDC – Casier MRP-KIN-0002',
+                    'code' => 'KTD-LBV-0002',
+                    'formatted_address' => $lockerAddress('KTD-LBV-0002'),
                 ],
             ],
-            // Client 3 – Bruxelles
+            // Client 3 – Port-Gentil
             [
                 'profile' => [
-                    'first_name' => 'Cédric',
-                    'last_name' => 'Ilunga',
-                    'email' => 'client3@monrespro.local',
-                    'phone' => '+32 460 500 001',
-                    'agency_id' => $bruxelles?->id,
+                    'first_name' => 'Prisca',
+                    'last_name' => 'Koumba',
+                    'email' => 'client3@kotinda.local',
+                    'phone' => '+241 077 50 00 03',
+                    'address' => 'Quartier Grand Village, Port-Gentil',
+                    'agency_id' => $portGentil?->id,
                     'is_active' => true,
                     'is_staff' => false,
                     'is_client' => true,
                 ],
+                'location' => ['GA', 'Port-Gentil'],
                 'user' => [
-                    'name' => 'Cédric Ilunga',
-                    'email' => 'client3@monrespro.local',
+                    'name' => 'Prisca Koumba',
+                    'email' => 'client3@kotinda.local',
                     'password' => 'password',
-                    'agency_id' => $bruxelles?->id,
+                    'agency_id' => $portGentil?->id,
                     'theme_preference' => 'dark',
                 ],
                 'role' => 'client',
                 'locker' => [
-                    'code' => 'MRP-BXL-0001',
-                    'formatted_address' => 'Monrespro Logistics, Entrepôt Bruxelles, Belgique – Casier MRP-BXL-0001',
+                    'code' => 'KTD-POG-0001',
+                    'formatted_address' => $lockerAddress('KTD-POG-0001'),
                 ],
             ],
         ];
 
         foreach ($demoUsers as $data) {
+            [$iso2, $city] = $data['location'];
+
             $profile = Profile::updateOrCreate(
                 ['email' => $data['profile']['email']],
-                $data['profile']
+                array_merge($data['profile'], $this->locate($iso2, $city))
             );
 
             $user = User::updateOrCreate(
@@ -1512,10 +1617,10 @@ class FullPlatformSeeder extends Seeder
     {
         $this->command?->info('Achats assistés et devis démo…');
 
-        $client1 = User::where('email', 'client1@monrespro.local')->first();
-        $client2 = User::where('email', 'client2@monrespro.local')->first();
-        $client3 = User::where('email', 'client3@monrespro.local')->first();
-        $operator = User::where('email', 'operateur@monrespro.local')->first();
+        $client1 = User::where('email', 'client1@kotinda.local')->first();
+        $client2 = User::where('email', 'client2@kotinda.local')->first();
+        $client3 = User::where('email', 'client3@kotinda.local')->first();
+        $operator = User::where('email', 'operateur@kotinda.local')->first();
 
         if (! $client1 || ! $operator) {
             $this->command?->warn('Utilisateurs démo introuvables, achats assistés ignorés.');
@@ -1528,14 +1633,17 @@ class FullPlatformSeeder extends Seeder
         $apple = Merchant::where('name', 'Apple')->first();
         $sephora = Merchant::where('name', 'Sephora')->first();
         $decathlon = Merchant::where('name', 'Decathlon')->first();
+        $noon = Merchant::where('name', 'Noon')->first();
 
+        // Montants en XAF (FCFA). Prix marchands convertis : 1 EUR = 655,957 XAF, 1 USD ≈ 600 XAF, 1 AED ≈ 163 XAF.
+        // Total = articles + commission 7 % (min 6 500) + fret + frais bancaires 3 % (+ douane / livraison selon le cas).
         $purchases = [
             // 1. Demande en attente de devis
             [
                 'parent' => [
                     'user_id' => $client1->id,
                     'status' => AssistedPurchaseStatus::PENDING_QUOTE,
-                    'notes' => 'Je voudrais commander ces articles pour un cadeau d\'anniversaire. Livraison à Kinshasa.',
+                    'notes' => 'Je voudrais commander ces articles pour un cadeau d\'anniversaire. Livraison à Libreville, quartier Louis.',
                     'product_url' => 'https://www.amazon.fr/dp/B0DFHBFQFB',
                     'article_label' => 'Apple AirPods Pro 2',
                     'quantity' => 1,
@@ -1545,7 +1653,7 @@ class FullPlatformSeeder extends Seeder
                     ['merchant_id' => $amazon?->id, 'url' => 'https://www.amazon.fr/dp/B09V3KXJPB', 'name' => 'Étui de protection AirPods Pro', 'options' => 'Couleur: Noir', 'quantity' => 2, 'unit_price' => null],
                 ],
             ],
-            // 2. Devis envoyé, en attente de paiement
+            // 2. Devis envoyé, en attente de paiement (colis type ≈ 70 000 FCFA)
             [
                 'parent' => [
                     'user_id' => $client1->id,
@@ -1555,28 +1663,27 @@ class FullPlatformSeeder extends Seeder
                     'product_url' => 'https://www.nike.com/fr/t/chaussure-air-max-90',
                     'article_label' => 'Nike Air Max 90',
                     'quantity' => 1,
-                    'quote_amount' => 145.00,
-                    'quote_currency' => 'USD',
-                    'service_fee' => 10.15,
+                    'price_displayed' => '79.99',
+                    'price_currency' => 'EUR',
+                    'quote_amount' => 52470,
+                    'quote_currency' => 'XAF',
+                    'service_fee' => 3673,
                     'bank_fee_percentage' => 3,
-                    'total_amount' => 214.00,
+                    'total_amount' => 68500,
                     'quoted_at' => now()->subDays(2),
                     'quote_version' => 1,
                     'quote_expires_at' => now()->addDays(5),
                     'estimated_weight_kg' => 1.2,
                 ],
                 'items' => [
-                    ['merchant_id' => $nike?->id, 'url' => 'https://www.nike.com/fr/t/chaussure-air-max-90', 'name' => 'Nike Air Max 90 - Homme', 'options' => 'Taille: 42, Couleur: Blanc/Noir', 'quantity' => 1, 'unit_price' => 145.00],
+                    ['merchant_id' => $nike?->id, 'url' => 'https://www.nike.com/fr/t/chaussure-air-max-90', 'name' => 'Nike Air Max 90 - Homme', 'options' => 'Taille: 42, Couleur: Blanc/Noir', 'quantity' => 1, 'unit_price' => 52470],
                 ],
                 'snapshot' => [
                     'version' => 1,
-                    'total_primary' => 214.00,
-                    'primary_currency' => 'USD',
-                    'total_secondary' => 599200,
-                    'secondary_currency' => 'CDF',
-                    'exchange_rate_used' => 2800.0000,
-                    'estimated_delivery' => '7-10 jours ouvrés',
-                    'staff_message' => 'Bonjour, voici votre devis pour les Nike Air Max 90. Le prix inclut la commission, le transport aérien et le dédouanement.',
+                    'total_primary' => 68500,
+                    'primary_currency' => 'XAF',
+                    'estimated_delivery' => '7-10 jours ouvrés (fret aérien Paris – Libreville)',
+                    'staff_message' => 'Bonjour, voici votre devis pour les Nike Air Max 90 (79,99 € soit 52 470 FCFA). Le total comprend la commission, le fret aérien (1,2 kg à 8 900 FCFA/kg) et les frais bancaires.',
                     'sent_at' => now()->subDays(2),
                     'expires_at' => now()->addDays(5),
                     'client_response' => 'pending',
@@ -1590,37 +1697,37 @@ class FullPlatformSeeder extends Seeder
                     'status' => AssistedPurchaseStatus::ORDERED,
                     'notes' => 'Lot de produits de beauté pour ma sœur.',
                     'product_url' => 'https://www.sephora.fr/p/palette-ombres',
-                    'article_label' => 'Palette Sephora + Parfum',
+                    'article_label' => 'Palette Sephora + eau de toilette',
                     'quantity' => 1,
-                    'quote_amount' => 89.90,
-                    'quote_currency' => 'EUR',
-                    'service_fee' => 10.00,
+                    'quote_amount' => 42575,
+                    'quote_currency' => 'XAF',
+                    'service_fee' => 2980,
                     'bank_fee_percentage' => 3,
-                    'total_amount' => 155.00,
+                    'total_amount' => 60800,
                     'quoted_at' => now()->subDays(5),
                     'paid_at' => now()->subDays(3),
                     'purchased_at' => now()->subDays(2),
-                    'supplier_tracking_number' => '9405511899223456789012',
+                    'supplier_tracking_number' => '6A12345678901',
                     'quote_version' => 1,
                     'estimated_weight_kg' => 0.8,
                 ],
                 'items' => [
-                    ['merchant_id' => $sephora?->id, 'url' => 'https://www.sephora.fr/p/palette-ombres', 'name' => 'Palette 16 ombres à paupières Sephora Collection', 'quantity' => 1, 'unit_price' => 29.90],
-                    ['merchant_id' => $sephora?->id, 'url' => 'https://www.sephora.fr/p/chance-eau-tendre', 'name' => 'CHANEL Chance Eau Tendre EDT 100ml', 'quantity' => 1, 'unit_price' => 60.00],
+                    ['merchant_id' => $sephora?->id, 'url' => 'https://www.sephora.fr/p/palette-ombres', 'name' => 'Palette 16 ombres à paupières Sephora Collection', 'quantity' => 1, 'unit_price' => 19615],
+                    ['merchant_id' => $sephora?->id, 'url' => 'https://www.sephora.fr/p/eau-de-toilette', 'name' => 'Eau de toilette Sephora Collection 100 ml', 'quantity' => 1, 'unit_price' => 22960],
                 ],
                 'snapshot' => [
                     'version' => 1,
-                    'total_primary' => 155.00,
-                    'primary_currency' => 'EUR',
+                    'total_primary' => 60800,
+                    'primary_currency' => 'XAF',
                     'estimated_delivery' => '10-14 jours ouvrés',
-                    'staff_message' => 'Devis pour vos articles Sephora. Transport depuis Paris.',
+                    'staff_message' => 'Devis pour vos articles Sephora. Transport aérien depuis Paris, livraison à domicile à Akanda incluse.',
                     'sent_at' => now()->subDays(5),
                     'expires_at' => now()->subDays(5)->addDays(7),
                     'client_response' => 'accepted',
                     'responded_at' => now()->subDays(4),
                 ],
                 'payments' => [
-                    ['amount' => 155.00, 'currency' => 'EUR', 'note' => 'Virement bancaire SEPA reçu'],
+                    ['amount' => 60800, 'currency' => 'XAF', 'note' => 'Paiement intégral – Airtel Money'],
                 ],
             ],
             // 4. Colis arrivé au hub (prêt à convertir en expédition)
@@ -1629,15 +1736,17 @@ class FullPlatformSeeder extends Seeder
                     'user_id' => $client1->id,
                     'operator_id' => $operator->id,
                     'status' => AssistedPurchaseStatus::ARRIVED_AT_HUB,
-                    'notes' => 'Trottinette électrique pour usage quotidien à Kinshasa.',
+                    'notes' => 'Trottinette électrique pour mes trajets quotidiens à Libreville.',
                     'product_url' => 'https://www.amazon.fr/dp/B0C5EXAMPLE',
                     'article_label' => 'Trottinette électrique intelligente',
                     'quantity' => 1,
-                    'quote_amount' => 350.00,
-                    'quote_currency' => 'USD',
-                    'service_fee' => 24.50,
+                    'price_displayed' => '299.00',
+                    'price_currency' => 'EUR',
+                    'quote_amount' => 196131,
+                    'quote_currency' => 'XAF',
+                    'service_fee' => 13729,
                     'bank_fee_percentage' => 3,
-                    'total_amount' => 480.00,
+                    'total_amount' => 325000,
                     'quoted_at' => now()->subDays(15),
                     'paid_at' => now()->subDays(12),
                     'purchased_at' => now()->subDays(10),
@@ -1647,58 +1756,55 @@ class FullPlatformSeeder extends Seeder
                     'hub_received_weight_kg' => 14.500,
                 ],
                 'items' => [
-                    ['merchant_id' => $amazon?->id, 'url' => 'https://www.amazon.fr/dp/B0C5EXAMPLE', 'name' => 'Trottinette électrique pliable 350W', 'options' => 'Couleur: Noir, Autonomie: 30km', 'quantity' => 1, 'unit_price' => 350.00],
+                    ['merchant_id' => $amazon?->id, 'url' => 'https://www.amazon.fr/dp/B0C5EXAMPLE', 'name' => 'Trottinette électrique pliable 350W', 'options' => 'Couleur: Noir, Autonomie: 30km', 'quantity' => 1, 'unit_price' => 196131],
                 ],
                 'snapshot' => [
                     'version' => 1,
-                    'total_primary' => 480.00,
-                    'primary_currency' => 'USD',
-                    'total_secondary' => 1344000,
-                    'secondary_currency' => 'CDF',
-                    'exchange_rate_used' => 2800.0000,
+                    'total_primary' => 325000,
+                    'primary_currency' => 'XAF',
                     'estimated_delivery' => '15-20 jours ouvrés',
-                    'staff_message' => 'Devis trottinette électrique. Article volumineux, expédition aérienne.',
+                    'staff_message' => 'Devis trottinette électrique. Article volumineux, fret aérien +10 kg à 7 500 FCFA/kg.',
                     'sent_at' => now()->subDays(15),
                     'expires_at' => now()->subDays(8),
                     'client_response' => 'accepted',
                     'responded_at' => now()->subDays(13),
                 ],
                 'payments' => [
-                    ['amount' => 200.00, 'currency' => 'USD', 'note' => 'Acompte 1 – M-Pesa'],
-                    ['amount' => 280.00, 'currency' => 'USD', 'note' => 'Solde – Orange Money'],
+                    ['amount' => 150000, 'currency' => 'XAF', 'note' => 'Acompte – Airtel Money'],
+                    ['amount' => 175000, 'currency' => 'XAF', 'note' => 'Solde – Moov Money'],
                 ],
             ],
-            // 5. Devis depuis Bruxelles (client3)
+            // 5. Devis envoyé à une cliente de Port-Gentil (fret maritime)
             [
                 'parent' => [
                     'user_id' => $client3?->id ?? $client1->id,
                     'operator_id' => $operator->id,
                     'status' => AssistedPurchaseStatus::QUOTED,
-                    'notes' => 'Équipement sportif pour la salle de sport à Lubumbashi.',
-                    'product_url' => 'https://www.decathlon.be/fr/p/halteres-20kg',
+                    'notes' => 'Équipement sportif pour ma salle de sport à Port-Gentil.',
+                    'product_url' => 'https://www.decathlon.fr/p/halteres-20kg',
                     'article_label' => 'Kit haltères Decathlon + tapis',
                     'quantity' => 1,
-                    'quote_amount' => 120.00,
-                    'quote_currency' => 'EUR',
-                    'service_fee' => 10.00,
+                    'quote_amount' => 78689,
+                    'quote_currency' => 'XAF',
+                    'service_fee' => 5508,
                     'bank_fee_percentage' => 3,
-                    'total_amount' => 195.00,
+                    'total_amount' => 174200,
                     'quoted_at' => now()->subDay(),
                     'quote_version' => 1,
                     'quote_expires_at' => now()->addDays(6),
                     'estimated_weight_kg' => 25.0,
                 ],
                 'items' => [
-                    ['merchant_id' => $decathlon?->id, 'url' => 'https://www.decathlon.be/fr/p/halteres-20kg', 'name' => 'Kit haltères 20 kg réglables', 'quantity' => 1, 'unit_price' => 79.99],
-                    ['merchant_id' => $decathlon?->id, 'url' => 'https://www.decathlon.be/fr/p/tapis-fitness', 'name' => 'Tapis de sol fitness 180 x 60 cm', 'quantity' => 1, 'unit_price' => 19.99],
-                    ['merchant_id' => $decathlon?->id, 'url' => 'https://www.decathlon.be/fr/p/bande-resistance', 'name' => 'Lot de 3 bandes de résistance élastiques', 'quantity' => 2, 'unit_price' => 9.99],
+                    ['merchant_id' => $decathlon?->id, 'url' => 'https://www.decathlon.fr/p/halteres-20kg', 'name' => 'Kit haltères 20 kg réglables', 'quantity' => 1, 'unit_price' => 52470],
+                    ['merchant_id' => $decathlon?->id, 'url' => 'https://www.decathlon.fr/p/tapis-fitness', 'name' => 'Tapis de sol fitness 180 x 60 cm', 'quantity' => 1, 'unit_price' => 13113],
+                    ['merchant_id' => $decathlon?->id, 'url' => 'https://www.decathlon.fr/p/bande-resistance', 'name' => 'Lot de 3 bandes de résistance élastiques', 'quantity' => 2, 'unit_price' => 6553],
                 ],
                 'snapshot' => [
                     'version' => 1,
-                    'total_primary' => 195.00,
-                    'primary_currency' => 'EUR',
-                    'estimated_delivery' => '7-10 jours ouvrés (fret aérien depuis Bruxelles)',
-                    'staff_message' => 'Devis pour votre équipement sportif Decathlon. Poids important, fret aérien recommandé.',
+                    'total_primary' => 174200,
+                    'primary_currency' => 'XAF',
+                    'estimated_delivery' => '5-8 semaines (fret maritime Le Havre – Owendo, puis Port-Gentil)',
+                    'staff_message' => 'Devis pour votre équipement sportif Decathlon. Poids important (25 kg) : fret maritime en groupage recommandé (3 500 FCFA/kg).',
                     'sent_at' => now()->subDay(),
                     'expires_at' => now()->addDays(6),
                     'client_response' => 'pending',
@@ -1714,37 +1820,34 @@ class FullPlatformSeeder extends Seeder
                     'product_url' => 'https://aliexpress.com/item/10050.html',
                     'article_label' => 'Coques + protections écran Samsung',
                     'quantity' => 5,
-                    'quote_amount' => 35.50,
-                    'quote_currency' => 'USD',
-                    'service_fee' => 10.00,
+                    'quote_amount' => 21294,
+                    'quote_currency' => 'XAF',
+                    'service_fee' => 6500,
                     'bank_fee_percentage' => 3,
-                    'total_amount' => 78.00,
+                    'total_amount' => 38100,
                     'quoted_at' => now()->subDays(3),
                     'paid_at' => now()->subDay(),
                     'quote_version' => 1,
                     'estimated_weight_kg' => 0.5,
                 ],
                 'items' => [
-                    ['merchant_id' => $aliexpress?->id, 'url' => 'https://aliexpress.com/item/10050.html', 'name' => 'Coque Samsung Galaxy S24 Ultra anti-choc', 'quantity' => 2, 'unit_price' => 8.50],
-                    ['merchant_id' => $aliexpress?->id, 'url' => 'https://aliexpress.com/item/10051.html', 'name' => 'Verre trempé Samsung Galaxy S24 Ultra (lot de 3)', 'quantity' => 1, 'unit_price' => 5.99],
-                    ['merchant_id' => $aliexpress?->id, 'url' => 'https://aliexpress.com/item/10052.html', 'name' => 'Câble USB-C charge rapide 2m (lot de 2)', 'quantity' => 2, 'unit_price' => 6.25],
+                    ['merchant_id' => $aliexpress?->id, 'url' => 'https://aliexpress.com/item/10050.html', 'name' => 'Coque Samsung Galaxy S24 Ultra anti-choc', 'quantity' => 2, 'unit_price' => 5100],
+                    ['merchant_id' => $aliexpress?->id, 'url' => 'https://aliexpress.com/item/10051.html', 'name' => 'Verre trempé Samsung Galaxy S24 Ultra (lot de 3)', 'quantity' => 1, 'unit_price' => 3594],
+                    ['merchant_id' => $aliexpress?->id, 'url' => 'https://aliexpress.com/item/10052.html', 'name' => 'Câble USB-C charge rapide 2m (lot de 2)', 'quantity' => 2, 'unit_price' => 3750],
                 ],
                 'snapshot' => [
                     'version' => 1,
-                    'total_primary' => 78.00,
-                    'primary_currency' => 'USD',
-                    'total_secondary' => 218400,
-                    'secondary_currency' => 'CDF',
-                    'exchange_rate_used' => 2800.0000,
-                    'estimated_delivery' => '15-25 jours (expédition depuis Chine)',
-                    'staff_message' => 'Devis accessoires Samsung depuis AliExpress. Regroupement en un seul colis.',
+                    'total_primary' => 38100,
+                    'primary_currency' => 'XAF',
+                    'estimated_delivery' => '15-25 jours (expédition depuis la Chine)',
+                    'staff_message' => 'Devis accessoires Samsung depuis AliExpress. Regroupement en un seul colis au hub de Guangzhou.',
                     'sent_at' => now()->subDays(3),
                     'expires_at' => now()->addDays(4),
                     'client_response' => 'accepted',
                     'responded_at' => now()->subDays(2),
                 ],
                 'payments' => [
-                    ['amount' => 78.00, 'currency' => 'USD', 'note' => 'Paiement intégral – Airtel Money'],
+                    ['amount' => 38100, 'currency' => 'XAF', 'note' => 'Paiement intégral – Moov Money'],
                 ],
             ],
             // 7. Devis expiré (pour historique)
@@ -1757,25 +1860,27 @@ class FullPlatformSeeder extends Seeder
                     'product_url' => 'https://www.amazon.fr/dp/B0DLEXAMPLE',
                     'article_label' => 'PC portable ASUS ROG Strix',
                     'quantity' => 1,
-                    'quote_amount' => 1299.00,
-                    'quote_currency' => 'EUR',
-                    'service_fee' => 90.93,
+                    'price_displayed' => '1299.00',
+                    'price_currency' => 'EUR',
+                    'quote_amount' => 852088,
+                    'quote_currency' => 'XAF',
+                    'service_fee' => 59646,
                     'bank_fee_percentage' => 3,
-                    'total_amount' => 1580.00,
+                    'total_amount' => 987300,
                     'quoted_at' => now()->subDays(30),
                     'quote_version' => 1,
                     'quote_expires_at' => now()->subDays(23),
                     'estimated_weight_kg' => 3.5,
                 ],
                 'items' => [
-                    ['merchant_id' => $amazon?->id, 'url' => 'https://www.amazon.fr/dp/B0DLEXAMPLE', 'name' => 'ASUS ROG Strix G16 - RTX 4060 - 16 Go RAM', 'quantity' => 1, 'unit_price' => 1299.00],
+                    ['merchant_id' => $amazon?->id, 'url' => 'https://www.amazon.fr/dp/B0DLEXAMPLE', 'name' => 'ASUS ROG Strix G16 - RTX 4060 - 16 Go RAM', 'quantity' => 1, 'unit_price' => 852088],
                 ],
                 'snapshot' => [
                     'version' => 1,
-                    'total_primary' => 1580.00,
-                    'primary_currency' => 'EUR',
+                    'total_primary' => 987300,
+                    'primary_currency' => 'XAF',
                     'estimated_delivery' => '7-10 jours ouvrés',
-                    'staff_message' => 'Devis PC portable ASUS ROG. Article de haute valeur, assurance incluse.',
+                    'staff_message' => 'Devis PC portable ASUS ROG. Article de haute valeur, assurance transport (2 %) incluse.',
                     'sent_at' => now()->subDays(30),
                     'expires_at' => now()->subDays(23),
                     'client_response' => 'pending',
@@ -1786,13 +1891,49 @@ class FullPlatformSeeder extends Seeder
                 'parent' => [
                     'user_id' => $client2?->id ?? $client1->id,
                     'status' => AssistedPurchaseStatus::CANCELLED,
-                    'notes' => 'Finalement j\'ai trouvé le produit localement.',
-                    'product_url' => 'https://www.jumia.cd/casque-bluetooth',
+                    'notes' => 'Finalement j\'ai trouvé le produit à Libreville, au marché de Mont-Bouët.',
+                    'product_url' => 'https://www.amazon.fr/dp/B0CJBLTUNE',
                     'article_label' => 'Casque Bluetooth JBL',
                     'quantity' => 1,
                 ],
                 'items' => [
-                    ['merchant_id' => null, 'url' => 'https://www.jumia.cd/casque-bluetooth', 'name' => 'JBL Tune 720BT Casque sans fil', 'quantity' => 1, 'unit_price' => null],
+                    ['merchant_id' => $amazon?->id, 'url' => 'https://www.amazon.fr/dp/B0CJBLTUNE', 'name' => 'JBL Tune 720BT Casque sans fil', 'quantity' => 1, 'unit_price' => null],
+                ],
+            ],
+            // 9. Devis depuis Dubaï (Noon)
+            [
+                'parent' => [
+                    'user_id' => $client2?->id ?? $client1->id,
+                    'operator_id' => $operator->id,
+                    'status' => AssistedPurchaseStatus::QUOTED,
+                    'notes' => 'Téléphone pour mon épouse, version double SIM.',
+                    'product_url' => 'https://www.noon.com/uae-en/galaxy-a55',
+                    'article_label' => 'Samsung Galaxy A55 5G',
+                    'quantity' => 1,
+                    'price_displayed' => '1199.00',
+                    'price_currency' => 'AED',
+                    'quote_amount' => 195437,
+                    'quote_currency' => 'XAF',
+                    'service_fee' => 13681,
+                    'bank_fee_percentage' => 3,
+                    'total_amount' => 223300,
+                    'quoted_at' => now()->subHours(6),
+                    'quote_version' => 1,
+                    'quote_expires_at' => now()->addDays(7),
+                    'estimated_weight_kg' => 0.6,
+                ],
+                'items' => [
+                    ['merchant_id' => $noon?->id, 'url' => 'https://www.noon.com/uae-en/galaxy-a55', 'name' => 'Samsung Galaxy A55 5G 256 Go double SIM', 'options' => 'Couleur: Bleu nuit', 'quantity' => 1, 'unit_price' => 195437],
+                ],
+                'snapshot' => [
+                    'version' => 1,
+                    'total_primary' => 223300,
+                    'primary_currency' => 'XAF',
+                    'estimated_delivery' => '6-9 jours ouvrés (fret aérien Dubaï – Libreville)',
+                    'staff_message' => 'Devis Samsung Galaxy A55 acheté sur Noon (1 199 AED). Fret aérien depuis notre hub de Dubaï.',
+                    'sent_at' => now()->subHours(6),
+                    'expires_at' => now()->addDays(7),
+                    'client_response' => 'pending',
                 ],
             ],
         ];

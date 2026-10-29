@@ -1,4 +1,4 @@
-{{ config('app.name', 'Monrespro') }} — Devis achat assisté #{{ $purchase->id }}
+{{ config('app.name', 'Kotinda') }} — Devis achat assisté #{{ $purchase->id }}
 
 Bonjour {{ $clientFirstName }},
 
@@ -19,4 +19,4 @@ TOTAL À PAYER : {{ $totalFormatted }}
 @endif
 Payer / suivre : {{ $paymentUrl }}
 
-— {{ config('app.name', 'Monrespro') }}
+— {{ config('app.name', 'Kotinda') }}

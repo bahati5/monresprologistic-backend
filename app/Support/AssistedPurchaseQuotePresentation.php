@@ -30,7 +30,7 @@ final class AssistedPurchaseQuotePresentation
      *   appliedRateVerbose: string,
      *   appliedRateSourceNote: string,
      *   appliedRateAsOf: ?string,
-     *   totalCdfFormatted: ?string,
+     *   totalXafFormatted: ?string,
      *   doc: array<string, mixed>
      * }
      */
@@ -39,7 +39,7 @@ final class AssistedPurchaseQuotePresentation
         $purchase->loadMissing(['user', 'items']);
 
         $doc = ShipmentDocumentSettings::merged();
-        $currency = (string) ($purchase->quote_currency ?? $doc['currency'] ?? 'EUR');
+        $currency = (string) ($purchase->quote_currency ?? $doc['currency'] ?? 'XAF');
 
         $symbol = trim((string) ($doc['currency_symbol'] ?? ''));
         if ($symbol === '') {
@@ -47,6 +47,7 @@ final class AssistedPurchaseQuotePresentation
                 'EUR' => '€',
                 'USD' => '$',
                 'GBP' => '£',
+                'XAF' => 'FCFA',
                 default => $currency,
             };
         }
@@ -65,11 +66,11 @@ final class AssistedPurchaseQuotePresentation
                 'EUR' => '€',
                 'USD' => '$',
                 'GBP' => '£',
-                'CDF' => 'CDF',
+                'XAF' => 'FCFA',
                 default => strtoupper($cur),
             };
 
-            return $sym === 'CDF' ? $num."\u{a0}CDF" : $sym.$num;
+            return $sym === 'FCFA' ? $num."\u{a0}FCFA" : $sym.$num;
         };
 
         $linesSubtotal = 0.0;
@@ -130,8 +131,8 @@ final class AssistedPurchaseQuotePresentation
             ? sprintf('1 %s = %s %s', strtoupper($sourceCurrency), $rateLabel, strtoupper($currency))
             : sprintf('1 %s = 1,000000 %s', strtoupper($currency), strtoupper($currency));
 
-        $cdfRate = ExchangeRate::currentRate(strtoupper($currency), 'CDF');
-        $totalCdf = ($cdfRate !== null && $cdfRate > 0) ? $total * $cdfRate : null;
+        $xafRate = strtoupper($currency) === 'XAF' ? null : ExchangeRate::currentRate(strtoupper($currency), 'XAF');
+        $totalXaf = ($xafRate !== null && $xafRate > 0) ? $total * $xafRate : null;
 
         $user = $purchase->user;
         $rawName = $user ? (is_string($user->name) ? $user->name : (string) $user->name) : '';
@@ -157,7 +158,7 @@ final class AssistedPurchaseQuotePresentation
             'appliedRateVerbose' => $rateVerbose,
             'appliedRateSourceNote' => $appliedRateSourceNote,
             'appliedRateAsOf' => $appliedRateAsOf,
-            'totalCdfFormatted' => $totalCdf !== null ? number_format($totalCdf, 2, ',', ' ')."\u{a0}CDF" : null,
+            'totalXafFormatted' => $totalXaf !== null ? number_format($totalXaf, 0, ',', ' ')."\u{a0}FCFA" : null,
             'currency' => $currency,
             'paymentUrl' => $paymentUrl,
             'paymentMethodsNote' => $paymentMethodsNote,

@@ -7,7 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * §3.4 — Webhook pour recevoir les emails entrants (achats@monrespro.cd).
+ * §3.4 — Webhook pour recevoir les emails entrants (achats@kotinda.ga).
  * Compatible avec les webhooks Mailgun, SendGrid, Postmark, etc.
  */
 class InboundEmailController extends Controller

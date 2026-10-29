@@ -16,7 +16,7 @@ class ProvisionRegisteredUser
         /** @var User $user */
         $user = $event->user;
 
-        if ($user->hasAnyRole(['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent'])) {
+        if ($user->hasAnyRole(['super_admin', 'agency_admin', 'operator', 'driver', 'customs_agent', 'sav_agent', 'accountant'])) {
             return;
         }
 
@@ -36,7 +36,7 @@ class ProvisionRegisteredUser
         $code = $this->uniqueLockerCode();
         $template = Setting::getValue(
             'locker_address_template',
-            "Monrespro Hub EU\n{{locker_code}}\n1000 Bruxelles, Belgique"
+            "Kotinda Hub Paris\n{{locker_code}}\n95700 Roissy-en-France, France"
         );
         $address = str_replace('{{locker_code}}', $code, $template ?? '');
 
@@ -50,7 +50,7 @@ class ProvisionRegisteredUser
     protected function uniqueLockerCode(): string
     {
         do {
-            $code = 'MRP-'.strtoupper(Str::random(4));
+            $code = 'KTD-'.strtoupper(Str::random(4));
         } while (Locker::query()->where('code', $code)->exists());
 
         return $code;

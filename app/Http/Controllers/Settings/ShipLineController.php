@@ -232,7 +232,7 @@ class ShipLineController extends Controller
     protected function syncRates(ShipLine $line, array $rates): void
     {
         $line->rates()->delete();
-        $defaultCurrency = strtoupper((string) Setting::getValue('currency', 'USD'));
+        $defaultCurrency = strtoupper((string) Setting::getValue('currency', 'XAF'));
 
         foreach ($rates as $row) {
             $modeId = (int) $row['shipping_mode_id'];
@@ -312,7 +312,7 @@ class ShipLineController extends Controller
      */
     protected function appendOrUpsertRates(ShipLine $line, array $rates): void
     {
-        $defaultCurrency = strtoupper((string) Setting::getValue('currency', 'USD'));
+        $defaultCurrency = strtoupper((string) Setting::getValue('currency', 'XAF'));
 
         foreach ($rates as $row) {
             $modeId = (int) $row['shipping_mode_id'];
